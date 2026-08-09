@@ -3,23 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mordekaiser — Élő Matchup Grimoire</title>
+<title>Mordekaiser — Élő Grimoire</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg-void:#0b0a0d;
-    --bg-stone:#16141a;
-    --bg-stone-2:#1d1a22;
-    --iron-mist:#3e4a47;
-    --spectral:#4fe3b0;
-    --spectral-dim:#2c8a6c;
-    --rune-gold:#c9a15a;
-    --rust:#b54b3d;
-    --ink:#ede7dd;
-    --ink-dim:#a79fb0;
-    --hairline:#2a2732;
+    --bg-void:#0b0a0d; --bg-stone:#16141a; --bg-stone-2:#1d1a22;
+    --iron-mist:#3e4a47; --spectral:#4fe3b0; --spectral-dim:#2c8a6c;
+    --rune-gold:#c9a15a; --rust:#b54b3d; --ink:#ede7dd; --ink-dim:#a79fb0; --hairline:#2a2732;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
@@ -28,246 +20,103 @@
       radial-gradient(ellipse 900px 500px at 15% -10%, rgba(79,227,176,0.08), transparent 60%),
       radial-gradient(ellipse 700px 500px at 100% 0%, rgba(201,161,90,0.06), transparent 60%),
       var(--bg-void);
-    color:var(--ink);
-    font-family:'IBM Plex Sans', sans-serif;
-    min-height:100vh;
+    color:var(--ink); font-family:'IBM Plex Sans', sans-serif; min-height:100vh;
   }
   ::selection{ background:var(--spectral); color:#08120e; }
-  a{color:var(--spectral);}
+  a{ color:var(--spectral); }
 
-  /* ---------- Header ---------- */
-  header.hero{
-    padding:64px 24px 40px;
-    text-align:center;
-    border-bottom:1px solid var(--hairline);
-    position:relative;
-    overflow:hidden;
-  }
-  header.hero::before{
-    content:"";
-    position:absolute; inset:0;
-    background:
-      repeating-linear-gradient(90deg, transparent, transparent 78px, rgba(255,255,255,0.012) 79px);
-    pointer-events:none;
-  }
-  .eyebrow{
-    font-family:'IBM Plex Mono', monospace;
-    letter-spacing:0.3em;
-    text-transform:uppercase;
-    font-size:11px;
-    color:var(--spectral);
-    margin-bottom:18px;
-  }
-  h1.title{
-    font-family:'Cinzel', serif;
-    font-weight:700;
-    font-size:clamp(32px, 6vw, 56px);
-    margin:0 0 10px;
-    letter-spacing:0.02em;
-    text-shadow:0 0 40px rgba(79,227,176,0.25);
-  }
+  header.hero{ padding:56px 24px 28px; text-align:center; border-bottom:1px solid var(--hairline); }
+  .eyebrow{ font-family:'IBM Plex Mono', monospace; letter-spacing:0.3em; text-transform:uppercase; font-size:11px; color:var(--spectral); margin-bottom:16px; }
+  h1.title{ font-family:'Cinzel', serif; font-weight:700; font-size:clamp(28px, 5.5vw, 48px); margin:0 0 8px; text-shadow:0 0 40px rgba(79,227,176,0.25); }
   h1.title span{ color:var(--spectral); }
-  .subtitle{
-    color:var(--ink-dim);
-    font-size:15px;
-    max-width:520px;
-    margin:0 auto;
-    line-height:1.6;
-  }
-  .sync-pill{
-    display:inline-flex; align-items:center; gap:8px;
-    margin-top:22px;
-    padding:7px 14px;
-    border:1px solid var(--hairline);
-    border-radius:100px;
-    font-family:'IBM Plex Mono', monospace;
-    font-size:11.5px;
-    color:var(--ink-dim);
-    background:rgba(255,255,255,0.02);
-  }
-  .sync-dot{
-    width:7px; height:7px; border-radius:50%;
-    background:var(--spectral);
-    box-shadow:0 0 8px var(--spectral);
-    animation:pulse 2s ease-in-out infinite;
-  }
+  .subtitle{ color:var(--ink-dim); font-size:14px; max-width:520px; margin:0 auto; line-height:1.6; }
+  .sync-pill{ display:inline-flex; align-items:center; gap:8px; margin-top:18px; padding:7px 14px; border:1px solid var(--hairline); border-radius:100px; font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--ink-dim); background:rgba(255,255,255,0.02); }
+  .sync-dot{ width:7px; height:7px; border-radius:50%; background:var(--spectral); box-shadow:0 0 8px var(--spectral); animation:pulse 2s ease-in-out infinite; }
   @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
 
-  /* ---------- Search ---------- */
-  .search-wrap{
-    max-width:640px; margin:34px auto 0; padding:0 24px;
+  nav.tabs{
+    display:flex; gap:6px; justify-content:center; flex-wrap:wrap;
+    padding:18px 16px; border-bottom:1px solid var(--hairline);
+    position:sticky; top:0; background:rgba(11,10,13,0.9); backdrop-filter:blur(10px); z-index:30;
   }
-  #search{
-    width:100%;
-    background:var(--bg-stone);
-    border:1px solid var(--hairline);
-    border-radius:10px;
-    padding:15px 18px;
-    font-family:'IBM Plex Sans', sans-serif;
-    font-size:15px;
-    color:var(--ink);
-    outline:none;
-    transition:border-color 0.2s, box-shadow 0.2s;
+  nav.tabs button{
+    font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.04em;
+    background:transparent; border:1px solid var(--hairline); color:var(--ink-dim);
+    padding:9px 16px; border-radius:8px; cursor:pointer; transition:all 0.15s ease;
   }
+  nav.tabs button:hover{ color:var(--ink); border-color:var(--spectral-dim); }
+  nav.tabs button.active{ color:var(--bg-void); background:var(--spectral); border-color:var(--spectral); font-weight:600; }
+
+  .search-wrap{ max-width:640px; margin:26px auto 0; padding:0 24px; }
+  #search{ width:100%; background:var(--bg-stone); border:1px solid var(--hairline); border-radius:10px; padding:15px 18px; font-family:'IBM Plex Sans', sans-serif; font-size:15px; color:var(--ink); outline:none; }
   #search::placeholder{ color:#6b6577; }
   #search:focus{ border-color:var(--spectral-dim); box-shadow:0 0 0 3px rgba(79,227,176,0.12); }
 
-  /* ---------- Grid ---------- */
-  main{ max-width:1180px; margin:0 auto; padding:40px 24px 100px; }
-  #status{
-    text-align:center; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace;
-    font-size:13px; padding:60px 0;
-  }
-  #grid{
-    display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));
-    gap:14px;
-  }
-  .card{
-    background:var(--bg-stone);
-    border:1px solid var(--hairline);
-    border-radius:12px;
-    overflow:hidden;
-    cursor:pointer;
-    position:relative;
-    transition:transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-  }
-  .card:hover{
-    transform:translateY(-3px);
-    border-color:var(--spectral-dim);
-    box-shadow:0 10px 30px rgba(0,0,0,0.4), 0 0 0 1px rgba(79,227,176,0.15);
-  }
-  .card .portrait-wrap{
-    width:100%; aspect-ratio:168/210;
-    background:var(--bg-stone-2);
-    overflow:hidden;
-    position:relative;
-  }
-  .card img.portrait{
-    width:100%; height:100%; object-fit:cover; object-position:center top;
-    display:block;
-    filter:saturate(0.92);
-  }
-  .card .portrait-wrap::after{
-    content:"";
-    position:absolute; inset:0;
-    background:linear-gradient(180deg, transparent 55%, rgba(11,10,13,0.92) 100%);
-  }
-  .card .name{
-    position:absolute; left:10px; right:10px; bottom:8px;
-    font-family:'Cinzel', serif;
-    font-weight:600;
-    font-size:14px;
-    z-index:2;
-  }
-  .card .diff-badge{
-    position:absolute; top:8px; right:8px; z-index:2;
-    font-family:'IBM Plex Mono', monospace;
-    font-size:11px; font-weight:600;
-    padding:3px 7px; border-radius:6px;
-    background:rgba(11,10,13,0.75);
-    border:1px solid var(--hairline);
-    backdrop-filter:blur(4px);
-  }
-  .diff-1, .diff-2 { color:var(--spectral); }
-  .diff-3 { color:var(--rune-gold); }
-  .diff-4, .diff-5 { color:var(--rust); }
+  main{ max-width:1180px; margin:0 auto; padding:36px 24px 100px; }
+  #status{ text-align:center; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace; font-size:13px; padding:60px 0; }
+  .config-warning{ max-width:640px; margin:60px auto; padding:20px 22px; border:1px solid var(--rust); border-radius:10px; background:rgba(181,75,61,0.08); font-size:14px; line-height:1.6; }
+  .config-warning code{ background:var(--bg-stone-2); padding:2px 6px; border-radius:4px; font-family:'IBM Plex Mono', monospace; font-size:12.5px; }
 
-  /* ---------- Detail overlay ---------- */
-  #overlay{
-    position:fixed; inset:0; z-index:50;
-    background:rgba(6,5,7,0.86);
-    backdrop-filter:blur(6px);
-    display:none;
-    overflow-y:auto;
-    padding:40px 20px;
-  }
+  .page-title{ font-family:'Cinzel', serif; font-size:24px; margin:0 0 22px; text-align:center; }
+
+  /* Matchup grid/card (from earlier build) */
+  #matchup-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:14px; }
+  .card{ background:var(--bg-stone); border:1px solid var(--hairline); border-radius:12px; overflow:hidden; cursor:pointer; position:relative; transition:transform 0.15s ease, border-color 0.15s ease; }
+  .card:hover{ transform:translateY(-3px); border-color:var(--spectral-dim); }
+  .card .portrait-wrap{ width:100%; aspect-ratio:168/210; background:var(--bg-stone-2); overflow:hidden; position:relative; }
+  .card img.portrait{ width:100%; height:100%; object-fit:cover; object-position:center top; display:block; filter:saturate(0.92); }
+  .card .portrait-wrap::after{ content:""; position:absolute; inset:0; background:linear-gradient(180deg, transparent 55%, rgba(11,10,13,0.92) 100%); }
+  .card .name{ position:absolute; left:10px; right:10px; bottom:8px; font-family:'Cinzel', serif; font-weight:600; font-size:14px; z-index:2; }
+  .card .diff-badge{ position:absolute; top:8px; right:8px; z-index:2; font-family:'IBM Plex Mono', monospace; font-size:11px; font-weight:600; padding:3px 7px; border-radius:6px; background:rgba(11,10,13,0.75); border:1px solid var(--hairline); }
+  .diff-1, .diff-2 { color:var(--spectral); } .diff-3 { color:var(--rune-gold); } .diff-4, .diff-5 { color:var(--rust); }
+
+  #overlay{ position:fixed; inset:0; z-index:50; background:rgba(6,5,7,0.86); backdrop-filter:blur(6px); display:none; overflow-y:auto; padding:40px 20px; }
   #overlay.open{ display:block; }
-  .sheet{
-    max-width:880px; margin:0 auto;
-    background:var(--bg-stone);
-    border:1px solid var(--hairline);
-    border-radius:16px;
-    overflow:hidden;
-  }
-  .sheet-head{
-    display:flex; gap:20px; padding:28px;
-    border-bottom:1px solid var(--hairline);
-    background:linear-gradient(135deg, rgba(79,227,176,0.06), transparent 60%);
-    position:relative;
-  }
-  .close-btn{
-    position:absolute; top:16px; right:16px;
-    width:34px; height:34px; border-radius:50%;
-    border:1px solid var(--hairline);
-    background:var(--bg-stone-2);
-    color:var(--ink);
-    font-size:16px; cursor:pointer;
-    display:flex; align-items:center; justify-content:center;
-  }
+  .sheet{ max-width:880px; margin:0 auto; background:var(--bg-stone); border:1px solid var(--hairline); border-radius:16px; overflow:hidden; }
+  .sheet-head{ display:flex; gap:20px; padding:28px; border-bottom:1px solid var(--hairline); background:linear-gradient(135deg, rgba(79,227,176,0.06), transparent 60%); position:relative; }
+  .close-btn{ position:absolute; top:16px; right:16px; width:34px; height:34px; border-radius:50%; border:1px solid var(--hairline); background:var(--bg-stone-2); color:var(--ink); font-size:16px; cursor:pointer; }
   .close-btn:hover{ border-color:var(--rust); color:var(--rust); }
-  .sheet-head img.portrait{
-    width:110px; height:138px; object-fit:cover; border-radius:8px;
-    border:1px solid var(--hairline);
-    flex-shrink:0;
-  }
-  .sheet-head-info h2{
-    font-family:'Cinzel', serif; font-size:28px; margin:0 0 6px;
-  }
+  .sheet-head img.portrait{ width:110px; height:138px; object-fit:cover; border-radius:8px; border:1px solid var(--hairline); flex-shrink:0; }
+  .sheet-head-info h2{ font-family:'Cinzel', serif; font-size:26px; margin:0 0 6px; }
   .sheet-head-info .vs{ color:var(--ink-dim); font-size:13px; margin-bottom:14px; }
-
   .forge{ display:flex; gap:18px; flex-wrap:wrap; }
-  .forge-stat{ font-family:'IBM Plex Mono', monospace; }
-  .forge-label{ font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:5px; }
+  .forge-label{ font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:5px; font-family:'IBM Plex Mono', monospace;}
   .forge-bar{ display:flex; gap:3px; }
   .notch{ width:16px; height:8px; border-radius:2px; background:var(--hairline); }
   .notch.filled{ background:var(--spectral); box-shadow:0 0 6px rgba(79,227,176,0.5); }
   .notch.filled.mid{ background:var(--rune-gold); box-shadow:0 0 6px rgba(201,161,90,0.5); }
   .notch.filled.high{ background:var(--rust); box-shadow:0 0 6px rgba(181,75,61,0.5); }
-
   .sheet-body{ padding:28px; }
-  .section-title{
-    font-family:'Cinzel', serif; font-size:14px; letter-spacing:0.08em;
-    text-transform:uppercase; color:var(--spectral); margin:26px 0 10px;
-    display:flex; align-items:center; gap:10px;
-  }
+  .section-title{ font-family:'Cinzel', serif; font-size:14px; letter-spacing:0.08em; text-transform:uppercase; color:var(--spectral); margin:26px 0 10px; display:flex; align-items:center; gap:10px; }
   .section-title::after{ content:""; flex:1; height:1px; background:var(--hairline); }
   .section-title:first-child{ margin-top:0; }
   .runes-row{ display:flex; gap:8px; flex-wrap:wrap; }
   .runes-row img{ width:44px; height:44px; border-radius:8px; background:var(--bg-stone-2); border:1px solid var(--hairline); }
-  pre.guide-text{
-    white-space:pre-wrap;
-    font-family:'IBM Plex Sans', sans-serif;
-    font-size:14px; line-height:1.75; color:var(--ink);
-    margin:0;
-  }
-  pre.item-text{
-    white-space:pre-wrap;
-    font-family:'IBM Plex Mono', monospace;
-    font-size:13px; line-height:1.7; color:var(--rune-gold);
-    margin:0;
-  }
-  pre.rune-text{
-    white-space:pre-wrap;
-    font-family:'IBM Plex Mono', monospace;
-    font-size:13px; line-height:1.7; color:var(--ink-dim);
-    margin:0;
-  }
+  pre.guide-text{ white-space:pre-wrap; font-family:'IBM Plex Sans', sans-serif; font-size:14px; line-height:1.75; color:var(--ink); margin:0; }
+  pre.item-text{ white-space:pre-wrap; font-family:'IBM Plex Mono', monospace; font-size:13px; line-height:1.7; color:var(--rune-gold); margin:0; }
+  pre.rune-text{ white-space:pre-wrap; font-family:'IBM Plex Mono', monospace; font-size:13px; line-height:1.7; color:var(--ink-dim); margin:0; }
 
-  footer{
-    text-align:center; padding:30px; color:var(--ink-dim);
-    font-family:'IBM Plex Mono', monospace; font-size:11.5px;
-    border-top:1px solid var(--hairline);
-  }
-  .config-warning{
-    max-width:640px; margin:60px auto; padding:20px 22px;
-    border:1px solid var(--rust); border-radius:10px;
-    background:rgba(181,75,61,0.08); font-size:14px; line-height:1.6;
-  }
-  .config-warning code{
-    background:var(--bg-stone-2); padding:2px 6px; border-radius:4px;
-    font-family:'IBM Plex Mono', monospace; font-size:12.5px;
-  }
+  /* Generic icon+text card grid (Itemization / Runes) */
+  .icon-section{ margin-bottom:34px; }
+  .icon-section h3{ font-family:'Cinzel', serif; font-size:17px; color:var(--rune-gold); border-bottom:1px solid var(--hairline); padding-bottom:8px; margin-bottom:14px; }
+  .icon-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px; }
+  .icon-card{ display:flex; gap:12px; background:var(--bg-stone); border:1px solid var(--hairline); border-radius:10px; padding:12px; }
+  .icon-card img{ width:44px; height:44px; border-radius:6px; flex-shrink:0; background:var(--bg-stone-2); object-fit:cover; }
+  .icon-card p{ margin:0; font-size:12.5px; line-height:1.55; color:var(--ink-dim); }
+  .icon-notes{ font-size:12px; color:var(--ink-dim); background:var(--bg-stone-2); border-radius:8px; padding:10px 12px; margin-top:8px; line-height:1.6; }
+
+  /* Generic data table (Alt setups / Content) */
+  .data-block{ margin-bottom:32px; }
+  .data-block h3{ font-family:'Cinzel', serif; font-size:16px; color:var(--rune-gold); margin-bottom:12px; }
+  table.data-table{ width:100%; border-collapse:collapse; font-size:13px; }
+  table.data-table th{ text-align:left; font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.05em; text-transform:uppercase; color:var(--spectral); border-bottom:1px solid var(--hairline); padding:8px 10px; }
+  table.data-table td{ border-bottom:1px solid var(--hairline); padding:10px; vertical-align:top; color:var(--ink); white-space:pre-wrap; line-height:1.5;}
+  table.data-table tr:hover td{ background:rgba(255,255,255,0.02); }
+
+  .paragraph-block{ background:var(--bg-stone); border:1px solid var(--hairline); border-radius:10px; padding:16px 18px; margin-bottom:12px; font-size:14px; line-height:1.7; white-space:pre-wrap; }
+  .paragraph-block strong{ color:var(--rune-gold); }
+
+  footer{ text-align:center; padding:30px; color:var(--ink-dim); font-family:'IBM Plex Mono', monospace; font-size:11.5px; border-top:1px solid var(--hairline); }
 </style>
 </head>
 <body>
@@ -275,219 +124,199 @@
 <header class="hero">
   <div class="eyebrow">Live-synced Champion Reference</div>
   <h1 class="title">Mordekaiser <span>Grimoire</span></h1>
-  <p class="subtitle">Minden matchup, amit Meowdekaiser dokumentált — közvetlenül a Google Sheetből, élőben. Amikor ő frissít egy sort, ez az oldal is frissül a következő betöltéskor.</p>
+  <p class="subtitle">A teljes Mordekaiser Bible, minden fül élőben szinkronizálva a Google Sheetből.</p>
   <div class="sync-pill"><span class="sync-dot"></span><span id="sync-label">Csatlakozás a táblázathoz…</span></div>
-  <div class="search-wrap">
-    <input id="search" type="text" placeholder="Keress bajnokot… pl. Aatrox, Akali, Annie" autocomplete="off">
-  </div>
 </header>
+
+<nav class="tabs" id="tabnav" style="display:none;">
+  <button data-tab="matchup" class="active">Matchup Guide</button>
+  <button data-tab="itemization">Itemization</button>
+  <button data-tab="runes">Rune Guide</button>
+  <button data-tab="altsetups">Alternate Setups</button>
+  <button data-tab="content">Content / Creators</button>
+  <button data-tab="home">Patch Notes</button>
+</nav>
+
+<div class="search-wrap" id="search-wrap" style="display:none;">
+  <input id="search" type="text" placeholder="Keress bajnokot… pl. Aatrox, Akali, Annie" autocomplete="off">
+</div>
 
 <main>
   <div id="status">A táblázat betöltése folyamatban…</div>
-  <div id="grid" style="display:none;"></div>
+  <div id="matchup-grid" style="display:none;"></div>
+  <div id="tab-itemization" class="tab-page" style="display:none;"></div>
+  <div id="tab-runes" class="tab-page" style="display:none;"></div>
+  <div id="tab-altsetups" class="tab-page" style="display:none;"></div>
+  <div id="tab-content" class="tab-page" style="display:none;"></div>
+  <div id="tab-home" class="tab-page" style="display:none;"></div>
 </main>
 
 <footer>Forrás: Mordekaiser Matchup Spreadsheet, készítette Meowdekaiser · Ez az oldal csak megjeleníti az ő élő adatait</footer>
 
-<div id="overlay">
-  <div class="sheet" id="sheet-content"></div>
-</div>
+<div id="overlay"><div class="sheet" id="sheet-content"></div></div>
 
 <script>
 /* =========================================================================
-   CONFIG — ide írd be a saját, korlátozott Google API kulcsodat.
-   Lásd a beállítási útmutatót (Google Cloud Console → API key).
+   CONFIG
    ========================================================================= */
 const API_KEY = "IDE_MASOLD_A_SAJAT_API_KULCSODAT";
 const SPREADSHEET_ID = "1BVH44IPxZNBQshDf90XZRJbfKvavVCUIIo_boyBVF8o";
-const SHEET_GID = 1046162980; // a tab azonosítója az URL-ből (gid=...)
-
+const TAB_GIDS = {
+  home:        848078357,
+  matchup:     1046162980,
+  itemization: 1054535084,
+  runes:       779082056,
+  altsetups:   2121273139,
+  content:     1118043832
+};
 /* ========================================================================= */
 
-const gridEl = document.getElementById('grid');
 const statusEl = document.getElementById('status');
 const syncLabel = document.getElementById('sync-label');
+const tabnav = document.getElementById('tabnav');
+const searchWrap = document.getElementById('search-wrap');
 const searchEl = document.getElementById('search');
 const overlay = document.getElementById('overlay');
 const sheetContent = document.getElementById('sheet-content');
+const matchupGrid = document.getElementById('matchup-grid');
 
 let champions = [];
+let activeTab = 'matchup';
 
 function showConfigWarning(msg){
-  statusEl.innerHTML = `<div class="config-warning">
-    <strong>Nincs beállítva az API kulcs.</strong><br><br>
-    ${msg}<br><br>
-    Nyisd meg ezt a fájlt szerkesztőben, és a <code>API_KEY</code> változó helyére írd be a saját
-    Google Sheets API kulcsodat a <code>&lt;script&gt;</code> blokk tetején.
-  </div>`;
+  statusEl.innerHTML = `<div class="config-warning"><strong>Nincs beállítva az API kulcs.</strong><br><br>${msg}<br><br>
+    Nyisd meg ezt a fájlt szerkesztőben, és a <code>API_KEY</code> változó helyére írd be a saját Google Sheets API kulcsodat.</div>`;
 }
 
-async function fetchSheet(){
+/* --------------------------- fetching --------------------------- */
+async function fetchAll(){
   if(!API_KEY || API_KEY.startsWith("IDE_")){
     showConfigWarning("Kövesd a beállítási lépéseket egy ingyenes API kulcs létrehozásához.");
     return;
   }
   try{
-    // 1. Lekérjük a tab nevét a gid alapján
     const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?key=${API_KEY}&fields=sheets.properties`);
     const metaJson = await metaRes.json();
     if(metaJson.error) throw new Error(metaJson.error.message);
-    const sheetProps = metaJson.sheets.find(s => s.properties.sheetId === SHEET_GID);
-    if(!sheetProps) throw new Error("Nem található a megadott gid-hez tartozó munkalap.");
-    const sheetTitle = sheetProps.properties.title;
 
-    // 2. Lekérjük az összes cellát FORMULA módban, hogy az =IMAGE(url) képletekből
-    //    ki tudjuk nyerni a kép URL-jét, a sima szöveges cellák pedig simán jönnek.
-    const range = `'${sheetTitle}'!A1:AA3000`;
-    const valuesRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueRenderOption=FORMULA&key=${API_KEY}`);
-    const valuesJson = await valuesRes.json();
-    if(valuesJson.error) throw new Error(valuesJson.error.message);
+    const titleByKey = {};
+    for(const key in TAB_GIDS){
+      const props = metaJson.sheets.find(s => s.properties.sheetId === TAB_GIDS[key]);
+      if(!props) throw new Error(`Nem található fül ehhez: ${key} (gid ${TAB_GIDS[key]})`);
+      titleByKey[key] = props.properties.title;
+    }
 
-    const rows = valuesJson.values || [];
-    champions = parseChampions(rows);
-    syncLabel.textContent = `Élő szinkron · ${champions.length} bajnok betöltve`;
-    renderGrid(champions);
+    const rangeParams = Object.values(titleByKey)
+      .map(t => `ranges=${encodeURIComponent("'" + t + "'!A1:AA3000")}`)
+      .join('&');
+    const batchRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values:batchGet?${rangeParams}&valueRenderOption=FORMULA&key=${API_KEY}`);
+    const batchJson = await batchRes.json();
+    if(batchJson.error) throw new Error(batchJson.error.message);
+
+    const rowsByKey = {};
+    const keys = Object.keys(titleByKey);
+    batchJson.valueRanges.forEach((vr, i) => { rowsByKey[keys[i]] = vr.values || []; });
+
+    champions = parseChampions(rowsByKey.matchup);
+    renderMatchupGrid(champions);
+
+    renderIconSections('tab-itemization', parseIconTextSections(rowsByKey.itemization));
+    renderIconSections('tab-runes', parseIconTextSections(rowsByKey.runes));
+    renderAltSetups(rowsByKey.altsetups);
+    renderContent(rowsByKey.content);
+    renderHome(rowsByKey.home);
+
+    syncLabel.textContent = `Élő szinkron · ${champions.length} matchup betöltve`;
+    statusEl.style.display = 'none';
+    tabnav.style.display = 'flex';
+    switchTab('matchup');
   }catch(err){
     console.error(err);
     statusEl.style.display = 'block';
     statusEl.innerHTML = `<div class="config-warning">Hiba a szinkronizálás közben: ${err.message}<br><br>
-      Ellenőrizd, hogy az API kulcs érvényes-e, a Sheets API engedélyezve van-e, és hogy a táblázat
-      "Anyone with the link" módban megtekinthető-e.</div>`;
+      Ellenőrizd, hogy az API kulcs érvényes-e, a Sheets API engedélyezve van-e, és hogy a táblázat "Anyone with the link" módban megtekinthető-e.</div>`;
   }
 }
 
-/* --------------------------------------------------------------------------
-   PARSER
-   A táblázat nem egységes rács: minden bajnokhoz több sor tartozik, vegyesen
-   képekkel, szöveggel. Ezért blokk-alapú, mintaillesztéses feldolgozást
-   használunk fix oszlop-pozíciók helyett, ami rugalmasabb apró eltérésekre.
-   -------------------------------------------------------------------------- */
+/* --------------------------- shared cell helpers --------------------------- */
 function extractImageUrl(cell){
   if(!cell) return null;
   const m = String(cell).match(/=IMAGE\(\s*"([^"]+)"/i);
   return m ? m[1] : null;
 }
-
+function extractHyperlink(cell){
+  if(!cell) return null;
+  const m = String(cell).match(/=HYPERLINK\(\s*"([^"]+)"\s*(?:,\s*"([^"]*)")?\s*\)/i);
+  if(!m) return null;
+  return { url: m[1], label: m[2] || m[1] };
+}
 function cellText(cell){
   if(!cell) return "";
   const s = String(cell);
-  if(s.startsWith("=")) return ""; // formula (image etc.), not plain text
+  if(s.startsWith("=")){
+    const link = extractHyperlink(s);
+    if(link) return link.label;
+    return "";
+  }
   return s.trim();
 }
+function escapeHtml(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
+/* --------------------------- MATCHUP tab parser/render --------------------------- */
 function parseChampions(rows){
   const anchors = [];
   rows.forEach((row, idx) => {
     const a = cellText(row[0]);
-    if(a && a.toLowerCase().startsWith("c:")){
-      anchors.push({ idx, name: a.slice(2).trim() });
-    }
+    if(a && a.toLowerCase().startsWith("c:")) anchors.push({ idx, name: a.slice(2).trim() });
   });
-
   const result = [];
   for(let i = 0; i < anchors.length; i++){
     const start = anchors[i].idx;
     const end = (i + 1 < anchors.length) ? anchors[i+1].idx : rows.length;
     const block = rows.slice(start, end);
-
-    const allCellsFlat = [];
-    const imageUrls = [];
-    block.forEach(row => {
-      (row || []).forEach(cell => {
-        const url = extractImageUrl(cell);
-        if(url) imageUrls.push(url);
-        const t = cellText(cell);
-        if(t) allCellsFlat.push(t);
-      });
-    });
-
-    // Portrait: tall aspect ratio image (w168-h1065 pattern in this sheet)
+    const allCellsFlat = []; const imageUrls = [];
+    block.forEach(row => (row || []).forEach(cell => {
+      const url = extractImageUrl(cell); if(url) imageUrls.push(url);
+      const t = cellText(cell); if(t) allCellsFlat.push(t);
+    }));
     let portrait = imageUrls.find(u => /w168-h1065/i.test(u)) || imageUrls[0] || null;
-
-    // Rune page screenshot (large square-ish image)
-    let runePage = imageUrls.find(u => /w604-h554/i.test(u)) || null;
-
-    // Small rune/item icons (roughly square, ~118px)
     const iconSet = [];
-    imageUrls.forEach(u => {
-      if(/w1(1[7-9]|2[0-9])-h11[0-9]/i.test(u) && !iconSet.includes(u)){
-        iconSet.push(u);
-      }
-    });
-
-    // Difficulty ratings
+    imageUrls.forEach(u => { if(/w1(1[7-9]|2[0-9])-h11[0-9]/i.test(u) && !iconSet.includes(u)) iconSet.push(u); });
     const joined = allCellsFlat.join(" | ");
     const diff = {};
     ["Early","Mid","Late","Overall"].forEach(k => {
       const m = joined.match(new RegExp(k + "\\s*:?\\s*(\\d)\\s*/\\s*5", "i"));
       diff[k.toLowerCase()] = m ? parseInt(m[1], 10) : null;
     });
-
-    // Gameplay guide text = longest cell (by far the big paragraph)
     let gameplay = "";
     allCellsFlat.forEach(t => { if(t.length > gameplay.length) gameplay = t; });
-
-    // Candidates excluding the gameplay text, sorted by length desc
     const remaining = allCellsFlat.filter(t => t !== gameplay).sort((a,b) => b.length - a.length);
-
-    // Rune build text: contains "->" arrow chain
     const runeBuild = remaining.find(t => t.includes("->")) || "";
-
-    // Itemization text: contains item-style "( ... )" descriptions, isn't the rune build
     const itemization = remaining.find(t => t !== runeBuild && /\(.*\)/.test(t) && t.length > 20) || "";
-
-    result.push({
-      name: anchors[i].name,
-      portrait,
-      runePage,
-      icons: iconSet,
-      difficulty: diff,
-      gameplay,
-      runeBuild,
-      itemization
-    });
+    result.push({ name: anchors[i].name, portrait, icons: iconSet, difficulty: diff, gameplay, runeBuild, itemization });
   }
   return result.filter(c => c.name);
 }
-
-/* --------------------------------------------------------------------------
-   RENDER
-   -------------------------------------------------------------------------- */
-function diffClass(n){
-  if(n === null) return "";
-  if(n <= 2) return "diff-" + n;
-  if(n === 3) return "diff-3";
-  return "diff-" + n;
-}
-
-function renderGrid(list){
-  statusEl.style.display = 'none';
-  gridEl.style.display = 'grid';
-  gridEl.innerHTML = list.map((c, i) => `
+function diffClass(n){ return n === null ? "" : "diff-" + n; }
+function renderMatchupGrid(list){
+  matchupGrid.innerHTML = list.map((c, i) => `
     <div class="card" data-idx="${i}">
       <div class="portrait-wrap">
         ${c.portrait ? `<img class="portrait" src="${c.portrait}" alt="${c.name}" loading="lazy">` : ''}
         ${c.difficulty.overall !== null ? `<div class="diff-badge ${diffClass(c.difficulty.overall)}">${c.difficulty.overall}/5</div>` : ''}
         <div class="name">${c.name}</div>
       </div>
-    </div>
-  `).join("");
-
-  gridEl.querySelectorAll('.card').forEach(card => {
+    </div>`).join("");
+  matchupGrid.querySelectorAll('.card').forEach(card => {
     card.addEventListener('click', () => openDetail(list[parseInt(card.dataset.idx)]));
   });
 }
-
 function forgeBar(label, value){
   let cls = "filled";
-  if(value >= 4) cls = "filled high";
-  else if(value === 3) cls = "filled mid";
-  const notches = Array.from({length:5}, (_, i) =>
-    `<div class="notch ${i < value ? cls : ''}"></div>`
-  ).join("");
-  return `<div class="forge-stat"><div class="forge-label">${label}</div><div class="forge-bar">${notches}</div></div>`;
+  if(value >= 4) cls = "filled high"; else if(value === 3) cls = "filled mid";
+  const notches = Array.from({length:5}, (_, i) => `<div class="notch ${i < value ? cls : ''}"></div>`).join("");
+  return `<div><div class="forge-label">${label}</div><div class="forge-bar">${notches}</div></div>`;
 }
-
 function openDetail(c){
   const d = c.difficulty;
   sheetContent.innerHTML = `
@@ -506,41 +335,172 @@ function openDetail(c){
       </div>
     </div>
     <div class="sheet-body">
-      ${c.icons.length ? `
-        <div class="section-title">Rúnák</div>
-        <div class="runes-row">${c.icons.map(u => `<img src="${u}" alt="rune icon">`).join("")}</div>
-      ` : ''}
-      ${c.runeBuild ? `
-        <div class="section-title">Rúna build</div>
-        <pre class="rune-text">${escapeHtml(c.runeBuild)}</pre>
-      ` : ''}
-      ${c.itemization ? `
-        <div class="section-title">Itemizáció</div>
-        <pre class="item-text">${escapeHtml(c.itemization)}</pre>
-      ` : ''}
-      ${c.gameplay ? `
-        <div class="section-title">Gameplay guide</div>
-        <pre class="guide-text">${escapeHtml(c.gameplay)}</pre>
-      ` : ''}
-    </div>
-  `;
+      ${c.icons.length ? `<div class="section-title">Rúnák</div><div class="runes-row">${c.icons.map(u => `<img src="${u}" alt="rune icon">`).join("")}</div>` : ''}
+      ${c.runeBuild ? `<div class="section-title">Rúna build</div><pre class="rune-text">${escapeHtml(c.runeBuild)}</pre>` : ''}
+      ${c.itemization ? `<div class="section-title">Itemizáció</div><pre class="item-text">${escapeHtml(c.itemization)}</pre>` : ''}
+      ${c.gameplay ? `<div class="section-title">Gameplay guide</div><pre class="guide-text">${escapeHtml(c.gameplay)}</pre>` : ''}
+    </div>`;
   overlay.classList.add('open');
   document.getElementById('close-btn').addEventListener('click', closeDetail);
 }
-
 function closeDetail(){ overlay.classList.remove('open'); }
 overlay.addEventListener('click', (e) => { if(e.target === overlay) closeDetail(); });
 
-function escapeHtml(s){
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+/* --------------------------- generic ICON+TEXT sections (Itemization / Runes) --------------------------- */
+const LABEL_WORDS = ["rune","explanation","first items","second items","third items","fourth+ items"];
+function parseIconTextSections(rows){
+  const sections = [];
+  let current = { title: null, items: [], notes: [] };
+  let dividerCount = 0;
+  function flush(){
+    if(current.items.length || current.notes.length) sections.push(current);
+  }
+  (rows || []).forEach(row => {
+    const cells = (row || []).map(cell => ({ img: extractImageUrl(cell), text: cellText(cell) }));
+    const nonEmpty = cells.filter(c => c.img || c.text);
+    if(nonEmpty.length === 0) return;
+
+    const hasImage = nonEmpty.some(c => c.img);
+    const textsOnly = nonEmpty.filter(c => !c.img).map(c => c.text.toLowerCase());
+
+    // pure label/header row (repeats like "Rune | Explanation | Rune | Explanation")
+    if(!hasImage && textsOnly.length >= 2 && textsOnly.every(t => LABEL_WORDS.includes(t))){
+      flush();
+      dividerCount++;
+      current = { title: null, items: [], notes: [] };
+      return;
+    }
+    // single short text cell, no image => section title
+    if(!hasImage && nonEmpty.length === 1 && nonEmpty[0].text.length < 70){
+      flush();
+      current = { title: nonEmpty[0].text, items: [], notes: [] };
+      return;
+    }
+    // data row: pair images with the next cell's text
+    const consumed = new Array(cells.length).fill(false);
+    cells.forEach((c, i) => {
+      if(c.img){
+        const partner = cells[i+1];
+        const text = (partner && partner.text) ? partner.text : "";
+        if(partner && partner.text) consumed[i+1] = true;
+        current.items.push({ icon: c.img, text });
+      }
+    });
+    cells.forEach((c, i) => {
+      if(c.text && !consumed[i] && !(cells[i-1] && cells[i-1].img)) current.notes.push(c.text);
+    });
+  });
+  flush();
+  return sections;
 }
+function renderIconSections(containerId, sections){
+  const el = document.getElementById(containerId);
+  if(!sections.length){ el.innerHTML = `<p style="color:var(--ink-dim); text-align:center;">Nincs megjeleníthető adat ezen a fülön.</p>`; return; }
+  el.innerHTML = sections.map(sec => `
+    <div class="icon-section">
+      ${sec.title ? `<h3>${escapeHtml(sec.title)}</h3>` : ''}
+      ${sec.items.length ? `<div class="icon-grid">
+        ${sec.items.map(it => `<div class="icon-card"><img src="${it.icon}" alt=""><p>${escapeHtml(it.text || '(nincs leírás)')}</p></div>`).join("")}
+      </div>` : ''}
+      ${sec.notes.length ? `<div class="icon-notes">${sec.notes.map(n => escapeHtml(n)).join("<br><br>")}</div>` : ''}
+    </div>`).join("");
+}
+
+/* --------------------------- ALTERNATE SETUPS tab (clean table) --------------------------- */
+function renderAltSetups(rows){
+  const el = document.getElementById('tab-altsetups');
+  const headerIdx = (rows || []).findIndex(r => cellText(r[0]) === "Build Concept");
+  if(headerIdx === -1){ el.innerHTML = `<p style="color:var(--ink-dim); text-align:center;">Nem található adat.</p>`; return; }
+
+  let html = `<div class="data-block"><table class="data-table"><thead><tr>
+    <th>Build</th><th>Rúnák</th><th>Itemek</th><th>Példa</th><th>Megjegyzés</th>
+  </tr></thead><tbody>`;
+  for(let i = headerIdx + 1; i < rows.length; i++){
+    const row = rows[i] || [];
+    const name = cellText(row[0]);
+    if(!name) continue;
+    // section divider rows like "Legacy entries:" have only col A filled, rest empty
+    const runes = cellText(row[2]), items = cellText(row[3]), example = cellText(row[4]), comments = cellText(row[6]);
+    if(!runes && !items && !example && !comments){
+      html += `</tbody></table></div><div class="data-block"><h3>${escapeHtml(name)}</h3><table class="data-table"><thead><tr>
+        <th>Build</th><th>Rúnák</th><th>Itemek</th><th>Példa</th><th>Megjegyzés</th></tr></thead><tbody>`;
+      continue;
+    }
+    html += `<tr><td><strong style="color:var(--rune-gold)">${escapeHtml(name)}</strong></td><td>${escapeHtml(runes)}</td><td>${escapeHtml(items)}</td><td>${escapeHtml(example)}</td><td>${escapeHtml(comments)}</td></tr>`;
+  }
+  html += `</tbody></table></div>`;
+  el.innerHTML = html;
+}
+
+/* --------------------------- CONTENT / CREATORS tab --------------------------- */
+function renderContent(rows){
+  const el = document.getElementById('tab-content');
+  let html = "";
+  let i = 0;
+  const R = rows || [];
+  while(i < R.length){
+    const row = R[i] || [];
+    const cells = row.map(cellText);
+    const nonEmptyCount = cells.filter(c => c).length;
+
+    // section title row: single meaningful cell in col A, longer label
+    if(nonEmptyCount === 1 && cells[0] && cells[0].length > 3 && !/^(Region)$/.test(cells[0])){
+      html += `<div class="data-block"><h3>${escapeHtml(cells[0])}</h3>`;
+      i++;
+      // does next row look like a table header?
+      const headerRow = (R[i] || []).map(cellText);
+      if(headerRow[0] === "Region"){
+        html += `<table class="data-table"><thead><tr>${headerRow.filter((h,idx)=>idx<8).map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>`;
+        i++;
+        while(i < R.length){
+          const dr = (R[i] || []).map(cellText);
+          if(dr.filter(c=>c).length <= 1) break;
+          html += `<tr>${dr.slice(0,8).map(c => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`;
+          i++;
+        }
+        html += `</tbody></table>`;
+      }
+      html += `</div>`;
+      continue;
+    }
+    i++;
+  }
+  el.innerHTML = html || `<p style="color:var(--ink-dim); text-align:center;">Nem található adat.</p>`;
+}
+
+/* --------------------------- HOME / PATCH NOTES tab --------------------------- */
+function renderHome(rows){
+  const el = document.getElementById('tab-home');
+  let html = "";
+  (rows || []).forEach(row => {
+    const texts = (row || []).map(cellText).filter(t => t);
+    if(!texts.length) return;
+    html += `<div class="paragraph-block">${texts.map(t => escapeHtml(t)).join(" — ")}</div>`;
+  });
+  el.innerHTML = html || `<p style="color:var(--ink-dim); text-align:center;">Nem található adat.</p>`;
+}
+
+/* --------------------------- tabs / search --------------------------- */
+function switchTab(tab){
+  activeTab = tab;
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  matchupGrid.style.display = tab === 'matchup' ? 'grid' : 'none';
+  searchWrap.style.display = tab === 'matchup' ? 'block' : 'none';
+  document.querySelectorAll('.tab-page').forEach(p => p.style.display = 'none');
+  if(tab !== 'matchup'){
+    document.getElementById('tab-' + tab).style.display = 'block';
+  }
+}
+tabnav.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-tab]');
+  if(btn) switchTab(btn.dataset.tab);
+});
 
 searchEl.addEventListener('input', () => {
   const q = searchEl.value.trim().toLowerCase();
   const filtered = q ? champions.filter(c => c.name.toLowerCase().includes(q)) : champions;
-  renderGrid(filtered);
+  renderMatchupGrid(filtered);
 });
-
 searchEl.addEventListener('keydown', (e) => {
   if(e.key === 'Enter'){
     const q = searchEl.value.trim().toLowerCase();
@@ -549,7 +509,7 @@ searchEl.addEventListener('keydown', (e) => {
   }
 });
 
-fetchSheet();
+fetchAll();
 </script>
 </body>
 </html>
