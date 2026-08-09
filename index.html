@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mordekaiser — Élő Grimoire V2</title>
+<title>Mordekaiser — Élő Grimoire V3</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -161,6 +161,11 @@
    ========================================================================= */
 const API_KEY = "AIzaSyCgxLgJKYU0U4jJ0m_2h_T3S-xO56Um8qE";
 const SPREADSHEET_ID = "1BVH44IPxZNBQshDf90XZRJbfKvavVCUIIo_boyBVF8o";
+
+// Optional Google Apps Script bridge. This is needed for native "Image in cell"
+// pictures because the Sheets REST values API does not expose their image URL.
+// Paste your deployed Apps Script /exec URL here. IMAGE() formulas still work without it.
+const IMAGE_API_URL = "";
 const TAB_GIDS = {
   home:        848078357,
   matchup:     1046162980,
@@ -182,6 +187,33 @@ const matchupGrid = document.getElementById('matchup-grid');
 
 let champions = [];
 let activeTab = 'matchup';
+const imageMaps = { matchup: new Map(), itemization: new Map(), runes: new Map() };
+
+function imageKey(row, col){ return `${row}:${col}`; }
+function imageUrlAt(map, row, col){ return map?.get(imageKey(row, col)) || null; }
+
+function loadImageMap(gid, key){
+  if(!IMAGE_API_URL) return Promise.resolve();
+  return new Promise((resolve) => {
+    const callbackName = `__sheetImages_${gid}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement('script');
+    const cleanup = () => {
+      try { delete window[callbackName]; } catch(e) {}
+      script.remove();
+    };
+    window[callbackName] = (payload) => {
+      try {
+        imageMaps[key].clear();
+        (payload.images || []).forEach(img => {
+          if(img.url) imageMaps[key].set(imageKey(img.row, img.col), img.url);
+        });
+      } finally { cleanup(); resolve(); }
+    };
+    script.onerror = () => { cleanup(); resolve(); };
+    script.src = `${IMAGE_API_URL}${IMAGE_API_URL.includes('?') ? '&' : '?'}gid=${encodeURIComponent(gid)}&prefix=${encodeURIComponent(callbackName)}`;
+    document.head.appendChild(script);
+  });
+}
 
 function showConfigWarning(msg){
   statusEl.innerHTML = `<div class="config-warning"><strong>Nincs beállítva az API kulcs.</strong><br><br>${msg}<br><br>
@@ -217,11 +249,18 @@ async function fetchAll(){
     const keys = Object.keys(titleByKey);
     batchJson.valueRanges.forEach((vr, i) => { rowsByKey[keys[i]] = vr.values || []; });
 
+    // Native Image-in-cell pictures are loaded through the Apps Script bridge.
+    await Promise.all([
+      loadImageMap(TAB_GIDS.matchup, 'matchup'),
+      loadImageMap(TAB_GIDS.itemization, 'itemization'),
+      loadImageMap(TAB_GIDS.runes, 'runes')
+    ]);
+
     champions = parseChampions(rowsByKey.matchup);
     renderMatchupGrid(champions);
 
-    renderIconSections('tab-itemization', parseIconTextSections(rowsByKey.itemization));
-    renderIconSections('tab-runes', parseIconTextSections(rowsByKey.runes));
+    renderIconSections('tab-itemization', parseIconTextSections(rowsByKey.itemization, imageMaps.itemization));
+    renderIconSections('tab-runes', parseIconTextSections(rowsByKey.runes, imageMaps.runes));
     renderAltSetups(rowsByKey.altsetups);
     renderContent(rowsByKey.content);
     renderHome(rowsByKey.home);
@@ -241,8 +280,15 @@ async function fetchAll(){
 /* --------------------------- shared cell helpers --------------------------- */
 function extractImageUrl(cell){
   if(!cell) return null;
-  const m = String(cell).match(/=IMAGE\(\s*"([^"]+)"/i);
-  return m ? m[1] : null;
+  const s = String(cell).trim();
+
+  // =IMAGE("https://...") and =IMAGE("https://...", 4, width, height)
+  const formula = s.match(/=IMAGE\(\s*["']([^"']+)["']/i);
+  if(formula) return formula[1];
+
+  // Also accept a plain image URL if the sheet contains one.
+  if(/^https?:\/\//i.test(s) && /\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$/i.test(s)) return s;
+  return null;
 }
 function extractHyperlink(cell){
   if(!cell) return null;
@@ -275,10 +321,21 @@ function parseChampions(rows){
     const end = (i + 1 < anchors.length) ? anchors[i+1].idx : rows.length;
     const block = rows.slice(start, end);
     const allCellsFlat = []; const imageUrls = [];
-    block.forEach(row => (row || []).forEach(cell => {
-      const url = extractImageUrl(cell); if(url) imageUrls.push(url);
-      const t = cellText(cell); if(t) allCellsFlat.push(t);
-    }));
+    block.forEach((row, rowOffset) => {
+      const sheetRow = start + rowOffset;
+      const imageCols = [];
+      imageMaps.matchup.forEach((url, key) => {
+        const [r, c] = key.split(':').map(Number);
+        if(r === sheetRow) imageCols.push(c);
+      });
+      const maxCols = Math.max((row || []).length, imageCols.length ? Math.max(...imageCols) + 1 : 0);
+      for(let col = 0; col < maxCols; col++){
+        const cell = (row || [])[col];
+        const url = extractImageUrl(cell) || imageUrlAt(imageMaps.matchup, sheetRow, col);
+        if(url) imageUrls.push(url);
+        const t = cellText(cell); if(t) allCellsFlat.push(t);
+      }
+    });
     let portrait = imageUrls.find(u => /w168-h1065/i.test(u)) || imageUrls[0] || null;
     const iconSet = [];
     imageUrls.forEach(u => { if(/w1(1[7-9]|2[0-9])-h11[0-9]/i.test(u) && !iconSet.includes(u)) iconSet.push(u); });
@@ -348,15 +405,24 @@ overlay.addEventListener('click', (e) => { if(e.target === overlay) closeDetail(
 
 /* --------------------------- generic ICON+TEXT sections (Itemization / Runes) --------------------------- */
 const LABEL_WORDS = ["rune","explanation","first items","second items","third items","fourth+ items"];
-function parseIconTextSections(rows){
+function parseIconTextSections(rows, imageMap = new Map()){
   const sections = [];
   let current = { title: null, items: [], notes: [] };
   let dividerCount = 0;
   function flush(){
     if(current.items.length || current.notes.length) sections.push(current);
   }
-  (rows || []).forEach(row => {
-    const cells = (row || []).map(cell => ({ img: extractImageUrl(cell), text: cellText(cell) }));
+  (rows || []).forEach((row, rowIdx) => {
+    const imageCols = [];
+    imageMap.forEach((url, key) => {
+      const [r, c] = key.split(':').map(Number);
+      if(r === rowIdx) imageCols.push(c);
+    });
+    const maxCols = Math.max((row || []).length, imageCols.length ? Math.max(...imageCols) + 1 : 0);
+    const cells = Array.from({length:maxCols}, (_, i) => {
+      const cell = (row || [])[i];
+      return { img: extractImageUrl(cell) || imageUrlAt(imageMap, rowIdx, i), text: cellText(cell) };
+    });
     const nonEmpty = cells.filter(c => c.img || c.text);
     if(nonEmpty.length === 0) return;
 
