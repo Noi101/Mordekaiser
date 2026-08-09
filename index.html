@@ -302,7 +302,7 @@ function renderMatchupGrid(list){
   matchupGrid.innerHTML = list.map((c, i) => `
     <div class="card" data-idx="${i}">
       <div class="portrait-wrap">
-        ${c.portrait ? `<img class="portrait" src="${c.portrait}" alt="${c.name}" loading="lazy">` : ''}
+        ${c.portrait ? `<img class="portrait" src="${c.portrait}" alt="${c.name}" loading="lazy" referrerpolicy="no-referrer">` : ''}
         ${c.difficulty.overall !== null ? `<div class="diff-badge ${diffClass(c.difficulty.overall)}">${c.difficulty.overall}/5</div>` : ''}
         <div class="name">${c.name}</div>
       </div>
@@ -322,7 +322,7 @@ function openDetail(c){
   sheetContent.innerHTML = `
     <div class="sheet-head">
       <button class="close-btn" id="close-btn">✕</button>
-      ${c.portrait ? `<img class="portrait" src="${c.portrait}" alt="${c.name}">` : ''}
+      ${c.portrait ? `<img class="portrait" src="${c.portrait}" alt="${c.name}" referrerpolicy="no-referrer">` : ''}
       <div class="sheet-head-info">
         <h2>${c.name}</h2>
         <div class="vs">Mordekaiser vs. ${c.name}</div>
@@ -335,7 +335,7 @@ function openDetail(c){
       </div>
     </div>
     <div class="sheet-body">
-      ${c.icons.length ? `<div class="section-title">Rúnák</div><div class="runes-row">${c.icons.map(u => `<img src="${u}" alt="rune icon">`).join("")}</div>` : ''}
+      ${c.icons.length ? `<div class="section-title">Rúnák</div><div class="runes-row">${c.icons.map(u => `<img src="${u}" alt="rune icon" referrerpolicy="no-referrer">`).join("")}</div>` : ''}
       ${c.runeBuild ? `<div class="section-title">Rúna build</div><pre class="rune-text">${escapeHtml(c.runeBuild)}</pre>` : ''}
       ${c.itemization ? `<div class="section-title">Itemizáció</div><pre class="item-text">${escapeHtml(c.itemization)}</pre>` : ''}
       ${c.gameplay ? `<div class="section-title">Gameplay guide</div><pre class="guide-text">${escapeHtml(c.gameplay)}</pre>` : ''}
@@ -400,7 +400,7 @@ function renderIconSections(containerId, sections){
     <div class="icon-section">
       ${sec.title ? `<h3>${escapeHtml(sec.title)}</h3>` : ''}
       ${sec.items.length ? `<div class="icon-grid">
-        ${sec.items.map(it => `<div class="icon-card"><img src="${it.icon}" alt=""><p>${escapeHtml(it.text || '(nincs leírás)')}</p></div>`).join("")}
+        ${sec.items.map(it => `<div class="icon-card"><img src="${it.icon}" alt="" referrerpolicy="no-referrer"><p>${escapeHtml(it.text || '(nincs leírás)')}</p></div>`).join("")}
       </div>` : ''}
       ${sec.notes.length ? `<div class="icon-notes">${sec.notes.map(n => escapeHtml(n)).join("<br><br>")}</div>` : ''}
     </div>`).join("");
