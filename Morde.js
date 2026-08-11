@@ -1,394 +1,2482 @@
 /* ============================================================
-   GAMES — WHACK A VAYNE
+   GOOGLE SHEETS CONFIG
    ============================================================ */
 
-let whackTimer = null;
-let whackSpawnTimer = null;
-let whackScore = 0;
-let whackMisses = 0;
-let whackTime = 30;
-let whackRunning = false;
-let whackActiveHole = -1;
+const API_KEY =
+  "AIzaSyCgxLgJKYU0U4jJ0m_2h_T3S-xO56Um8qE";
 
-function renderGames(){
-  const el = document.getElementById("tab-games");
-  if(!el) return;
+const SPREADSHEET_ID =
+  "1BVH44IPxZNBQshDf90XZRJbfKvavVCUIIo_boyBVF8o";
 
-  const vayneImage =
-    `${DDRAGON_BASE}/cdn/img/champion/loading/Vayne_0.jpg`;
+const TAB_GIDS = {
+  home:        848078357,
+  matchup:     1046162980,
+  itemization: 1054535084,
+  runes:       779082056,
+  altsetups:   2121273139,
+  content:     225968364
+};
 
-  el.innerHTML = `
-    <div class="games-list">
-      <h2 class="games-title">Games</h2>
 
-      <div class="game-list-grid">
+/* ============================================================
+   DATA DRAGON CONFIG
 
-        <button
-          class="game-card active"
-          type="button"
-          data-game="whack-vayne"
-        >
-          <span class="game-card-icon">⚒</span>
+   NOTE ON VERSIONING: /api/versions.json always returns every
+   patch version with the newest one first, so versions[0] below
+   is always the latest patch. Every image URL built from
+   ddragonVersion (champion square icons, item icons) is
+   therefore already current. Champion "loading" art and rune
+   icons live at unversioned CDN paths by design (Riot doesn't
+   version those folders) and always reflect the latest assets
+   Riot has published, so nothing extra is needed there either.
+   ============================================================ */
 
-          <span>
-            <strong>Whack A Vayne</strong>
-            <small>
-              30 seconds · click Vayne before she disappears.
-            </small>
-          </span>
-        </button>
+const DDRAGON_BASE =
+  "https://ddragon.leagueoflegends.com";
 
-        <div
-          class="game-card disabled"
-          aria-disabled="true"
-        >
-          <span class="game-card-icon">☠</span>
+let ddragonVersion = null;
+let ddragonChampions = {};
+let ddragonItems = {};
+let ddragonRunes = {};
 
-          <span>
-            <strong>Mordekaiser Arena</strong>
-            <small>Coming soon.</small>
-          </span>
-        </div>
 
-        <div
-          class="game-card disabled"
-          aria-disabled="true"
-        >
-          <span class="game-card-icon">♜</span>
+/* ============================================================
+   DOM
+   ============================================================ */
 
-          <span>
-            <strong>Realm of Death</strong>
-            <small>Coming soon.</small>
-          </span>
-        </div>
+const statusEl =
+  document.getElementById("status");
 
-      </div>
-    </div>
+const syncLabel =
+  document.getElementById("sync-label");
 
-    <section
-      class="wav-game"
-      aria-label="Whack A Vayne"
-    >
+const tabnav =
+  document.getElementById("tabnav");
 
-      <h2>Whack A Vayne</h2>
+const navToggle =
+  document.getElementById("nav-toggle");
 
-      <p class="wav-intro">
-        Vayne has entered the Realm of Death.
-        Bonk her with your Morde mace.
-        Hit as many as you can before the timer reaches zero.
-      </p>
+const tabsInner =
+  document.getElementById("tabs-inner");
 
-      <div class="wav-hud">
+const searchWrap =
+  document.getElementById("search-wrap");
 
-        <div class="wav-stat">
-          <span class="wav-stat-label">Score</span>
-          <span
-            class="wav-stat-value"
-            id="wav-score"
-          >
-            0
-          </span>
-        </div>
+const searchEl =
+  document.getElementById("search");
 
-        <div class="wav-stat">
-          <span class="wav-stat-label">Misses</span>
-          <span
-            class="wav-stat-value"
-            id="wav-misses"
-          >
-            0
-          </span>
-        </div>
+const overlay =
+  document.getElementById("overlay");
 
-        <div class="wav-stat">
-          <span class="wav-stat-label">Time</span>
-          <span
-            class="wav-stat-value"
-            id="wav-time"
-          >
-            30
-          </span>
-        </div>
+const sheetContent =
+  document.getElementById("sheet-content");
 
-        <button
-          class="wav-start-btn"
-          id="wav-start"
-          type="button"
-        >
-          Start Game
-        </button>
+const matchupGrid =
+  document.getElementById("matchup-grid");
 
-      </div>
+const nightfallVeil =
+  document.getElementById("nightfall-veil");
 
-      <div
-        class="wav-board"
-        id="wav-board"
-      >
 
-        ${Array.from({length:9}, (_,i) => `
-          <div
-            class="wav-hole"
-            data-hole="${i}"
-          >
+let champions = [];
+let activeTab = "matchup";
 
-            <div class="wav-mound"></div>
 
-            <button
-              class="wav-mole"
-              type="button"
-              aria-label="Vayne"
-              tabindex="-1"
-            >
-              <img
-                src="${vayneImage}"
-                alt="Vayne"
-              >
-            </button>
+/* ============================================================
+   HELPERS
+   ============================================================ */
 
-          </div>
-        `).join("")}
+function escapeHtml(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
 
-      </div>
 
-      <div
-        class="wav-result"
-        id="wav-result"
-        aria-live="polite"
-      >
-        Press Start Game to begin.
-      </div>
+function normalizeName(name){
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[’']/g,"")
+    .replace(/&/g,"and")
+    .replace(/[^a-z0-9]/g,"");
+}
 
-    </section>
-  `;
 
-  const start =
-    document.getElementById("wav-start");
+/*
+ * cellText: gives you the *displayable text* of a cell.
+ * - Plain values pass through.
+ * - =HYPERLINK("url","label") resolves to its label.
+ * - =IMAGE("url") has no text label, so this returns "" —
+ *   use extractImageUrl() below to get the picture itself.
+ */
+function cellText(cell){
+  if(cell === null || cell === undefined){
+    return "";
+  }
 
-  start.addEventListener(
-    "click",
-    startWhackGame
+  const s = String(cell);
+
+  if(s.startsWith("=")){
+    const link = extractHyperlink(s);
+
+    if(link){
+      return link.label;
+    }
+
+    return "";
+  }
+
+  return s.trim();
+}
+
+
+function extractHyperlink(cell){
+  if(!cell){
+    return null;
+  }
+
+  const m = String(cell).match(
+    /=HYPERLINK\(\s*"([^"]+)"\s*(?:,\s*"([^"]*)")?\s*\)/i
   );
 
-  document
-    .querySelectorAll(".wav-mole")
-    .forEach(mole => {
+  if(!m){
+    return null;
+  }
 
-      mole.addEventListener(
-        "click",
-        e => {
+  return {
+    url:m[1],
+    label:m[2] || m[1]
+  };
+}
 
-          e.preventDefault();
 
-          if(!whackRunning)
-            return;
+/*
+ * Cells where a rune/item picture was inserted with Sheets'
+ * "insert image in cell" feature come back (with
+ * valueRenderOption=FORMULA) as =IMAGE("https://..."). This
+ * pulls that URL out directly so we show the exact picture the
+ * spreadsheet author chose, instead of guessing from text.
+ */
+function extractImageUrl(cell){
+  if(!cell){
+    return null;
+  }
 
-          const hole =
-            mole.closest(".wav-hole");
+  const s = String(cell);
 
-          if(!hole.classList.contains("up"))
-            return;
+  if(!s.startsWith("=")){
+    return null;
+  }
 
-          whackScore++;
+  const m = s.match(
+    /=IMAGE\(\s*"([^"]+)"/i
+  );
 
-          hole.classList.remove("up");
-          hole.classList.add("hit");
+  return m ? m[1] : null;
+}
 
-          whackActiveHole = -1;
 
-          updateWhackHud();
+function diffClass(n){
+  return n === null ? "" : "diff-" + n;
+}
 
-          setTimeout(
-            () => hole.classList.remove("hit"),
-            180
-          );
 
-          scheduleWhackSpawn(160);
-        }
-      );
+/* ============================================================
+   DATA DRAGON
+   ============================================================ */
+
+async function loadDataDragon(){
+
+  const versionsResponse =
+    await fetch(
+      DDRAGON_BASE + "/api/versions.json",
+      {cache:"no-store"}
+    );
+
+  if(!versionsResponse.ok){
+    throw new Error(
+      "Could not load Riot Data Dragon versions."
+    );
+  }
+
+  const versions =
+    await versionsResponse.json();
+
+  if(!versions.length){
+    throw new Error(
+      "Riot Data Dragon returned no versions."
+    );
+  }
+
+  // versions[0] is always the newest patch — see note above.
+  ddragonVersion = versions[0];
+
+  /*
+   * Champion data.
+   */
+  const championResponse =
+    await fetch(
+      `${DDRAGON_BASE}/cdn/${ddragonVersion}/data/en_US/champion.json`,
+      {cache:"no-store"}
+    );
+
+  if(championResponse.ok){
+
+    const championJson =
+      await championResponse.json();
+
+    ddragonChampions =
+      championJson.data || {};
+  }
+
+  /*
+   * Item data.
+   */
+  const itemResponse =
+    await fetch(
+      `${DDRAGON_BASE}/cdn/${ddragonVersion}/data/en_US/item.json`,
+      {cache:"no-store"}
+    );
+
+  if(itemResponse.ok){
+
+    const itemJson =
+      await itemResponse.json();
+
+    ddragonItems =
+      itemJson.data || {};
+  }
+
+  /*
+   * Rune data.
+   */
+  const runeResponse =
+    await fetch(
+      `${DDRAGON_BASE}/cdn/${ddragonVersion}/data/en_US/runesReforged.json`,
+      {cache:"no-store"}
+    );
+
+  if(runeResponse.ok){
+
+    const runeJson =
+      await runeResponse.json();
+
+    ddragonRunes = {};
+
+    runeJson.forEach(style => {
+
+      if(style.name){
+        ddragonRunes[
+          normalizeName(style.name)
+        ] = {
+          name:style.name,
+          icon:`${DDRAGON_BASE}/cdn/img/${style.icon}`
+        };
+      }
+
+      (style.slots || []).forEach(slot => {
+
+        (slot.runes || []).forEach(rune => {
+
+          if(rune.name){
+
+            ddragonRunes[
+              normalizeName(rune.name)
+            ] = {
+              name:rune.name,
+              icon:`${DDRAGON_BASE}/cdn/img/${rune.icon}`
+            };
+          }
+
+        });
+
+      });
 
     });
+  }
 }
 
 
-function updateWhackHud(){
+/* ============================================================
+   CHAMPION IMAGE LOOKUP
+   ============================================================ */
 
-  const score =
-    document.getElementById("wav-score");
+function findChampionData(name){
 
-  const misses =
-    document.getElementById("wav-misses");
+  const wanted =
+    normalizeName(name);
 
-  const time =
-    document.getElementById("wav-time");
+  /*
+   * First try exact normalized name.
+   */
+  for(const key in ddragonChampions){
 
-  if(score)
-    score.textContent = whackScore;
-
-  if(misses)
-    misses.textContent = whackMisses;
-
-  if(time)
-    time.textContent = whackTime;
-}
-
-
-function scheduleWhackSpawn(
-  delay = 420
-){
-
-  clearTimeout(
-    whackSpawnTimer
-  );
-
-  whackSpawnTimer =
-    setTimeout(
-      spawnVayne,
-      delay
-    );
-}
-
-
-function spawnVayne(){
-
-  if(!whackRunning)
-    return;
-
-  const holes =
-    [...document.querySelectorAll(".wav-hole")];
-
-  if(!holes.length)
-    return;
-
-  // If the previous Vayne was still visible,
-  // count it as a miss.
-  if(whackActiveHole >= 0){
-
-    const previous =
-      holes[whackActiveHole];
+    const champ =
+      ddragonChampions[key];
 
     if(
-      previous &&
-      previous.classList.contains("up")
+      normalizeName(champ.name) === wanted
     ){
-
-      whackMisses++;
-
-      previous.classList.remove("up");
-
-      updateWhackHud();
+      return champ;
     }
   }
 
-  let next =
-    Math.floor(
-      Math.random() * holes.length
-    );
+  /*
+   * Handle common names containing punctuation.
+   */
+  const aliases = {
+    "wukong":"MonkeyKing",
+    "chogath":"Chogath",
+    "drmundo":"DrMundo",
+    "jarvaniv":"JarvanIV",
+    "leesin":"LeeSin",
+    "masteryi":"MasterYi",
+    "missfortune":"MissFortune",
+    "reksai":"RekSai",
+    "renataglasc":"Renata",
+    "tahmkench":"TahmKench",
+    "twistedfate":"TwistedFate",
+    "xinzhao":"XinZhao"
+  };
 
-  // Don't immediately use the same hole.
-  if(
-    next === whackActiveHole &&
-    holes.length > 1
-  ){
-    next =
-      (next + 1) % holes.length;
+  if(aliases[wanted] && ddragonChampions[aliases[wanted]]){
+    return ddragonChampions[aliases[wanted]];
   }
 
-  whackActiveHole = next;
+  return null;
+}
 
-  holes[next].classList.add("up");
 
-  scheduleWhackSpawn(
-    650 + Math.random() * 550
+/*
+ * Uses the "loading" splash art (308x560, always the latest
+ * skin Riot has published for that champion) instead of the
+ * 120x120 square icon. The card/overlay CSS boxes are sized to
+ * this exact ratio, so the whole portrait shows — nothing gets
+ * stretched into a square-in-a-tall-box crop anymore.
+ */
+function championImage(name){
+
+  const champ =
+    findChampionData(name);
+
+  if(!champ){
+    return null;
+  }
+
+  return (
+    `${DDRAGON_BASE}/cdn/img/champion/loading/${champ.id}_0.jpg`
   );
 }
 
 
-function startWhackGame(){
+/*
+ * The classic 120x120 square icon — used for the Whack-a-Vayne
+ * game holes, where a tall splash crop wouldn't read at that
+ * size.
+ */
+function championSquareImage(name){
 
-  clearInterval(whackTimer);
-  clearTimeout(whackSpawnTimer);
+  const champ =
+    findChampionData(name);
 
-  whackScore = 0;
-  whackMisses = 0;
-  whackTime = 30;
+  if(!champ || !ddragonVersion){
+    return null;
+  }
 
-  whackRunning = true;
-  whackActiveHole = -1;
+  return (
+    `${DDRAGON_BASE}/cdn/${ddragonVersion}/img/champion/${champ.id}.png`
+  );
+}
 
-  const start =
-    document.getElementById("wav-start");
 
-  const result =
-    document.getElementById("wav-result");
+/* ============================================================
+   ITEM IMAGE LOOKUP (text-name fallback, used only when a
+   cell has no inserted =IMAGE() picture to read directly)
+   ============================================================ */
 
-  document
-    .querySelectorAll(".wav-hole")
-    .forEach(h => {
-      h.classList.remove(
-        "up",
-        "hit"
+function findItemData(text){
+
+  const wanted =
+    normalizeName(text);
+
+  if(!wanted){
+    return null;
+  }
+
+  /*
+   * Exact item-name matching.
+   */
+  for(const id in ddragonItems){
+
+    const item =
+      ddragonItems[id];
+
+    if(!item.name){
+      continue;
+    }
+
+    if(
+      normalizeName(item.name) === wanted
+    ){
+      return {
+        id:id,
+        name:item.name,
+        icon:
+          `${DDRAGON_BASE}/cdn/${ddragonVersion}` +
+          `/img/item/${id}.png`
+      };
+    }
+  }
+
+  /*
+   * If the spreadsheet cell contains a longer build
+   * description, search for an item name inside it. We keep
+   * the LONGEST matching item name (not just the first one
+   * object-key order happens to hit) so e.g. "Death's Dance"
+   * isn't shadowed by a shorter unrelated match.
+   */
+  let best = null;
+
+  for(const id in ddragonItems){
+
+    const item =
+      ddragonItems[id];
+
+    if(!item.name){
+      continue;
+    }
+
+    const itemName =
+      normalizeName(item.name);
+
+    if(
+      itemName.length >= 4 &&
+      wanted.includes(itemName) &&
+      (!best || itemName.length > normalizeName(best.name).length)
+    ){
+      best = {
+        id:id,
+        name:item.name,
+        icon:
+          `${DDRAGON_BASE}/cdn/${ddragonVersion}` +
+          `/img/item/${id}.png`
+      };
+    }
+  }
+
+  return best;
+}
+
+
+/* ============================================================
+   RUNE IMAGE LOOKUP (text-name fallback)
+   ============================================================ */
+
+function findRuneData(text){
+
+  const wanted =
+    normalizeName(text);
+
+  if(!wanted){
+    return null;
+  }
+
+  if(ddragonRunes[wanted]){
+    return ddragonRunes[wanted];
+  }
+
+  let best = null;
+
+  for(const key in ddragonRunes){
+
+    if(
+      key.length >= 4 &&
+      wanted.includes(key) &&
+      (!best || key.length > normalizeName(best.name).length)
+    ){
+      best = ddragonRunes[key];
+    }
+  }
+
+  return best;
+}
+
+
+/* ============================================================
+   GOOGLE SHEETS FETCHING
+   ============================================================ */
+
+async function fetchAll(){
+
+  if(
+    !API_KEY ||
+    API_KEY.startsWith("IDE_")
+  ){
+    showConfigWarning(
+      "A Google Sheets API key is missing."
+    );
+
+    return;
+  }
+
+  try{
+
+    syncLabel.textContent =
+      "Loading Riot assets…";
+
+    await loadDataDragon();
+
+    syncLabel.textContent =
+      "Loading spreadsheet…";
+
+    const metaRes =
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/` +
+        `${SPREADSHEET_ID}?key=${API_KEY}` +
+        `&fields=sheets.properties`
       );
-    });
 
-  start.disabled = true;
-  start.textContent = "Game Running…";
+    const metaJson =
+      await metaRes.json();
 
-  result.textContent =
-    "Get her!";
+    if(metaJson.error){
+      throw new Error(
+        metaJson.error.message
+      );
+    }
 
-  updateWhackHud();
+    const titleByKey = {};
 
-  spawnVayne();
+    for(const key in TAB_GIDS){
 
-  whackTimer =
-    setInterval(() => {
+      const props =
+        metaJson.sheets.find(
+          s =>
+            s.properties.sheetId ===
+            TAB_GIDS[key]
+        );
 
-      whackTime--;
+      if(!props){
 
-      updateWhackHud();
-
-      if(whackTime <= 0){
-        endWhackGame();
+        throw new Error(
+          `Could not find sheet for ${key} ` +
+          `(gid ${TAB_GIDS[key]})`
+        );
       }
 
-    }, 1000);
+      titleByKey[key] =
+        props.properties.title;
+    }
+
+
+    const rangeParams =
+      Object.values(titleByKey)
+        .map(
+          t =>
+            `ranges=${encodeURIComponent(
+              "'" + t + "'!A1:AA3000"
+            )}`
+        )
+        .join("&");
+
+
+    const batchRes =
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/` +
+        `${SPREADSHEET_ID}/values:batchGet?` +
+        `${rangeParams}` +
+        `&valueRenderOption=FORMULA` +
+        `&key=${API_KEY}`
+      );
+
+
+    const batchJson =
+      await batchRes.json();
+
+    if(batchJson.error){
+      throw new Error(
+        batchJson.error.message
+      );
+    }
+
+
+    const rowsByKey = {};
+    const keys =
+      Object.keys(titleByKey);
+
+
+    batchJson.valueRanges.forEach(
+      (vr,i) => {
+        rowsByKey[keys[i]] =
+          vr.values || [];
+      }
+    );
+
+
+    champions =
+      parseChampions(
+        rowsByKey.matchup
+      );
+
+
+    renderMatchupGrid(
+      champions
+    );
+
+
+    renderIconSections(
+      "tab-itemization",
+      parseTextSections(
+        rowsByKey.itemization,
+        "item"
+      )
+    );
+
+
+    renderIconSections(
+      "tab-runes",
+      parseTextSections(
+        rowsByKey.runes,
+        "rune"
+      )
+    );
+
+
+    renderAltSetups(
+      rowsByKey.altsetups
+    );
+
+
+    renderContent(
+      rowsByKey.content
+    );
+
+
+    renderHome(
+      rowsByKey.home
+    );
+
+
+    renderGamesPage();
+
+
+    syncLabel.textContent =
+      `Live sync · ${champions.length} matchups · ` +
+      `Data Dragon ${ddragonVersion}`;
+
+
+    statusEl.style.display =
+      "none";
+
+    tabnav.style.display =
+      "flex";
+
+    switchTab("matchup");
+
+
+  }catch(err){
+
+    console.error(err);
+
+    statusEl.style.display =
+      "block";
+
+    statusEl.innerHTML =
+      `<div class="config-warning">
+        <strong>Synchronization error</strong>
+        <br><br>
+        ${escapeHtml(err.message)}
+        <br><br>
+        Check your Google Sheets API key,
+        spreadsheet permissions, and Data Dragon connection.
+      </div>`;
+  }
 }
 
 
-function endWhackGame(){
+function showConfigWarning(msg){
 
-  clearInterval(whackTimer);
-  clearTimeout(whackSpawnTimer);
+  statusEl.innerHTML =
+    `<div class="config-warning">
+      <strong>Configuration problem</strong>
+      <br><br>
+      ${escapeHtml(msg)}
+    </div>`;
+}
 
-  whackRunning = false;
+
+/* ============================================================
+   MATCHUP PARSER
+   ============================================================ */
+
+function parseChampions(rows){
+
+  const anchors = [];
+
+  rows.forEach(
+    (row,idx) => {
+
+      const a =
+        cellText(row[0]);
+
+      if(
+        a &&
+        a.toLowerCase().startsWith("c:")
+      ){
+
+        anchors.push({
+          idx:idx,
+          name:a.slice(2).trim()
+        });
+      }
+    }
+  );
+
+
+  const result = [];
+
+
+  for(
+    let i = 0;
+    i < anchors.length;
+    i++
+  ){
+
+    const start =
+      anchors[i].idx;
+
+    const end =
+      i + 1 < anchors.length
+        ? anchors[i + 1].idx
+        : rows.length;
+
+
+    const block =
+      rows.slice(start,end);
+
+
+    const allCellsFlat = [];
+
+
+    block.forEach(
+      row => {
+
+        (row || []).forEach(
+          cell => {
+
+            const text =
+              cellText(cell);
+
+            if(text){
+              allCellsFlat.push(text);
+            }
+
+          }
+        );
+
+      }
+    );
+
+
+    /*
+     * Get the champion image from Data Dragon,
+     * NOT from Google Sheets.
+     */
+    const portrait =
+      championImage(
+        anchors[i].name
+      );
+
+
+    const joined =
+      allCellsFlat.join(" | ");
+
+
+    const diff = {};
+
+
+    [
+      "Early",
+      "Mid",
+      "Late",
+      "Overall"
+    ].forEach(
+      k => {
+
+        const m =
+          joined.match(
+            new RegExp(
+              k +
+              "\\s*:?\\s*(\\d)\\s*/\\s*5",
+              "i"
+            )
+          );
+
+        diff[
+          k.toLowerCase()
+        ] =
+          m
+            ? parseInt(m[1],10)
+            : null;
+      }
+    );
+
+
+    let gameplay = "";
+
+    allCellsFlat.forEach(
+      t => {
+
+        if(
+          t.length >
+          gameplay.length
+        ){
+          gameplay = t;
+        }
+
+      }
+    );
+
+
+    const remaining =
+      allCellsFlat
+        .filter(
+          t => t !== gameplay
+        )
+        .sort(
+          (a,b) =>
+            b.length - a.length
+        );
+
+
+    const runeBuild =
+      remaining.find(
+        t => t.includes("->")
+      ) || "";
+
+
+    const itemization =
+      remaining.find(
+        t =>
+          t !== runeBuild &&
+          /\(.*\)/.test(t) &&
+          t.length > 20
+      ) || "";
+
+
+    result.push({
+      name:anchors[i].name,
+      portrait:portrait,
+      difficulty:diff,
+      gameplay:gameplay,
+      runeBuild:runeBuild,
+      itemization:itemization
+    });
+  }
+
+
+  return result.filter(
+    c => c.name
+  );
+}
+
+
+/* ============================================================
+   MATCHUP RENDER
+   ============================================================ */
+
+function renderMatchupGrid(list){
+
+  matchupGrid.innerHTML =
+    list.map(
+      (c,i) => {
+
+        const image =
+          c.portrait
+            ? `<img
+                class="portrait"
+                src="${c.portrait}"
+                alt="${escapeHtml(c.name)}"
+                loading="lazy"
+              >`
+            : `<div
+                style="
+                  width:100%;
+                  height:100%;
+                  display:flex;
+                  align-items:center;
+                  justify-content:center;
+                  color:var(--ink-dim);
+                  font-size:12px;
+                  padding:15px;
+                  text-align:center;
+                "
+              >
+                ${escapeHtml(c.name)}
+              </div>`;
+
+
+        return `
+          <div
+            class="card"
+            data-idx="${i}"
+          >
+            <div class="portrait-wrap">
+
+              ${image}
+
+              ${
+                c.difficulty.overall !== null
+                  ? `
+                    <div
+                      class="diff-badge ${diffClass(
+                        c.difficulty.overall
+                      )}"
+                    >
+                      ${c.difficulty.overall}/5
+                    </div>
+                  `
+                  : ""
+              }
+
+              <div class="name">
+                ${escapeHtml(c.name)}
+              </div>
+
+            </div>
+          </div>
+        `;
+      }
+    )
+    .join("");
+
+
+  matchupGrid
+    .querySelectorAll(".card")
+    .forEach(
+      card => {
+
+        card.addEventListener(
+          "click",
+          () => {
+
+            openDetail(
+              list[
+                parseInt(
+                  card.dataset.idx
+                )
+              ]
+            );
+
+          }
+        );
+
+      }
+    );
+}
+
+
+/* ============================================================
+   DIFFICULTY BAR
+   ============================================================ */
+
+function forgeBar(label,value){
+
+  let cls =
+    "filled";
+
+  if(value >= 4){
+    cls =
+      "filled high";
+  }else if(value === 3){
+    cls =
+      "filled mid";
+  }
+
+
+  const notches =
+    Array.from(
+      {length:5},
+      (_,i) =>
+        `<div class="notch ${
+          i < value ? cls : ""
+        }"></div>`
+    ).join("");
+
+
+  return `
+    <div>
+      <div class="forge-label">
+        ${label}
+      </div>
+
+      <div class="forge-bar">
+        ${notches}
+      </div>
+    </div>
+  `;
+}
+
+
+/* ============================================================
+   MATCHUP DETAIL
+   ============================================================ */
+
+function openDetail(c){
+
+  const d =
+    c.difficulty;
+
+
+  sheetContent.innerHTML =
+    `
+      <div class="sheet-head">
+
+        <button
+          class="close-btn"
+          id="close-btn"
+        >
+          ✕
+        </button>
+
+        ${
+          c.portrait
+            ? `
+              <img
+                class="portrait"
+                src="${c.portrait}"
+                alt="${escapeHtml(c.name)}"
+              >
+            `
+            : ""
+        }
+
+        <div class="sheet-head-info">
+
+          <h2>
+            ${escapeHtml(c.name)}
+          </h2>
+
+          <div class="vs">
+            Mordekaiser vs. ${escapeHtml(c.name)}
+          </div>
+
+          <div class="forge">
+
+            ${
+              d.early !== null
+                ? forgeBar(
+                    "Early",
+                    d.early
+                  )
+                : ""
+            }
+
+            ${
+              d.mid !== null
+                ? forgeBar(
+                    "Mid",
+                    d.mid
+                  )
+                : ""
+            }
+
+            ${
+              d.late !== null
+                ? forgeBar(
+                    "Late",
+                    d.late
+                  )
+                : ""
+            }
+
+            ${
+              d.overall !== null
+                ? forgeBar(
+                    "Overall",
+                    d.overall
+                  )
+                : ""
+            }
+
+          </div>
+
+        </div>
+      </div>
+
+
+      <div class="sheet-body">
+
+        ${
+          c.runeBuild
+            ? `
+              <div class="section-title">
+                Rune Build
+              </div>
+
+              <pre class="rune-text">${
+                escapeHtml(
+                  c.runeBuild
+                )
+              }</pre>
+            `
+            : ""
+        }
+
+
+        ${
+          c.itemization
+            ? `
+              <div class="section-title">
+                Itemization
+              </div>
+
+              <pre class="item-text">${
+                escapeHtml(
+                  c.itemization
+                )
+              }</pre>
+            `
+            : ""
+        }
+
+
+        ${
+          c.gameplay
+            ? `
+              <div class="section-title">
+                Gameplay Guide
+              </div>
+
+              <pre class="guide-text">${
+                escapeHtml(
+                  c.gameplay
+                )
+              }</pre>
+            `
+            : ""
+        }
+
+      </div>
+    `;
+
+
+  overlay.classList.add(
+    "open"
+  );
+
 
   document
-    .querySelectorAll(".wav-hole")
-    .forEach(h => {
-      h.classList.remove("up");
+    .getElementById("close-btn")
+    .addEventListener(
+      "click",
+      closeDetail
+    );
+}
+
+
+function closeDetail(){
+  overlay.classList.remove(
+    "open"
+  );
+}
+
+
+overlay.addEventListener(
+  "click",
+  e => {
+
+    if(
+      e.target === overlay
+    ){
+      closeDetail();
+    }
+
+  }
+);
+
+
+/* ============================================================
+   TEXT / ICON SECTIONS (Rune Guide + Itemization tabs)
+
+   The sheet repeats column pairs across a row, exactly like:
+   [Rune][Explanation][Rune][Explanation][Rune][Explanation]
+   (or [Item][Explanation] on the itemization tab). This parser
+   finds the header row that declares those pairs, then reads
+   every data row strictly by that pairing — column i is the
+   icon, column i+1 is ALWAYS its explanation. That's what fixes
+   "items on the same line getting treated as different items":
+   they were being scanned independently before instead of
+   paired to the column layout the sheet actually uses.
+   ============================================================ */
+
+const NAME_HEADER_RE = /^(rune|item|items)$/i;
+const EXPLANATION_HEADER_RE = /^explanation$/i;
+
+
+function detectPairColumns(row){
+
+  const cells =
+    (row || []).map(cellText);
+
+  const pairs = [];
+
+  for(let i = 0; i < cells.length - 1; i++){
+
+    if(
+      NAME_HEADER_RE.test(cells[i]) &&
+      EXPLANATION_HEADER_RE.test(cells[i + 1])
+    ){
+      pairs.push([i, i + 1]);
+    }
+  }
+
+  return pairs;
+}
+
+
+function parseTextSections(rows,iconType){
+
+  const sections = [];
+
+  let current = null;
+  let pairCols = [];
+
+
+  function flush(){
+
+    if(
+      current &&
+      (current.items.length || current.notes.length)
+    ){
+      sections.push(current);
+    }
+  }
+
+
+  function startSection(title){
+
+    flush();
+
+    current = {
+      title:title,
+      items:[],
+      notes:[]
+    };
+  }
+
+
+  (rows || []).forEach(row => {
+
+    const cells =
+      (row || []).map(cellText);
+
+    const nonEmpty =
+      cells.filter(Boolean);
+
+    if(!nonEmpty.length){
+      return;
+    }
+
+    /*
+     * Header row declaring the Icon/Explanation column pairs
+     * for the rows that follow (can repeat per section, as in
+     * the screenshot where each new block re-declares it).
+     */
+    const detected =
+      detectPairColumns(row);
+
+    if(detected.length){
+
+      pairCols = detected;
+
+      if(!current){
+        startSection(null);
+      }
+
+      return;
+    }
+
+    /*
+     * A lone short cell is a section heading
+     * (e.g. a category name above a block of runes/items).
+     */
+    if(
+      nonEmpty.length === 1 &&
+      nonEmpty[0].length < 70
+    ){
+      startSection(nonEmpty[0]);
+      return;
+    }
+
+    if(!current){
+      startSection(null);
+    }
+
+    if(!pairCols.length){
+      // No header seen yet for this block — fall back to
+      // treating the row as freeform notes rather than
+      // guessing at column meaning.
+      current.notes.push(cells.filter(Boolean).join(" — "));
+      return;
+    }
+
+    pairCols.forEach(([nameCol,explCol]) => {
+
+      const rawName =
+        (row || [])[nameCol];
+
+      const nameText =
+        cellText(rawName);
+
+      const explText =
+        cellText((row || [])[explCol]);
+
+      const directImage =
+        extractImageUrl(rawName);
+
+      let icon = directImage;
+      let label = nameText;
+
+      if(!icon && nameText){
+
+        const found =
+          iconType === "item"
+            ? findItemData(nameText)
+            : findRuneData(nameText);
+
+        if(found){
+          icon = found.icon;
+          label = found.name;
+        }
+      }
+
+      if(!icon && !nameText && explText){
+
+        // Last resort: the name cell was blank (image the
+        // Sheets API couldn't expose) — try to infer from the
+        // explanation text itself.
+        const found =
+          iconType === "item"
+            ? findItemData(explText)
+            : findRuneData(explText);
+
+        if(found){
+          icon = found.icon;
+          label = found.name;
+        }
+      }
+
+      if(icon || explText || label){
+
+        current.items.push({
+          icon:icon,
+          label:label,
+          text:explText
+        });
+      }
+
     });
 
-  const start =
+  });
+
+
+  flush();
+
+  return sections;
+}
+
+
+function renderIconSections(containerId,sections){
+
+  const el =
+    document.getElementById(containerId);
+
+
+  if(!sections.length){
+
+    el.innerHTML =
+      `<p style="
+        color:var(--ink-dim);
+        text-align:center;
+      ">
+        No displayable data on this tab.
+      </p>`;
+
+    return;
+  }
+
+
+  el.innerHTML =
+    sections.map(
+      sec => `
+
+        <div class="icon-section">
+
+          ${
+            sec.title
+              ? `
+                <h3>
+                  ${escapeHtml(
+                    sec.title
+                  )}
+                </h3>
+              `
+              : ""
+          }
+
+
+          ${
+            sec.items.length
+              ? `
+                <div class="icon-grid">
+
+                  ${
+                    sec.items.map(
+                      it => `
+                        <div class="icon-card">
+
+                          ${
+                            it.icon
+                              ? `
+                                <img
+                                  src="${it.icon}"
+                                  alt=""
+                                  loading="lazy"
+                                >
+                              `
+                              : `
+                                <div class="icon-placeholder">
+                                  ${
+                                    it.label
+                                      ? escapeHtml(it.label)
+                                      : "?"
+                                  }
+                                </div>
+                              `
+                          }
+
+                          <p>
+                            ${
+                              it.label
+                                ? `<strong>${escapeHtml(it.label)}</strong>`
+                                : ""
+                            }
+                            ${escapeHtml(
+                              it.text ||
+                              "(no description)"
+                            )}
+                          </p>
+
+                        </div>
+                      `
+                    ).join("")
+                  }
+
+                </div>
+              `
+              : ""
+          }
+
+
+          ${
+            sec.notes.length
+              ? `
+                <div class="icon-notes">
+                  ${
+                    sec.notes
+                      .map(
+                        n =>
+                          escapeHtml(n)
+                      )
+                      .join(
+                        "<br><br>"
+                      )
+                  }
+                </div>
+              `
+              : ""
+          }
+
+        </div>
+      `
+    ).join("");
+}
+
+
+/* ============================================================
+   ALTERNATE SETUPS
+   ============================================================ */
+
+function renderAltSetups(rows){
+
+  const el =
+    document.getElementById(
+      "tab-altsetups"
+    );
+
+
+  const headerIdx =
+    (rows || []).findIndex(
+      r =>
+        cellText(r[0]) ===
+        "Build Concept"
+    );
+
+
+  if(headerIdx === -1){
+
+    el.innerHTML =
+      `<p style="
+        color:var(--ink-dim);
+        text-align:center;
+      ">
+        No data found.
+      </p>`;
+
+    return;
+  }
+
+
+  let html =
+    `
+      <div class="data-block">
+
+        <table class="data-table">
+
+          <thead>
+            <tr>
+              <th>Build</th>
+              <th>Runes</th>
+              <th>Items</th>
+              <th>Example</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+
+          <tbody>
+    `;
+
+
+  for(
+    let i = headerIdx + 1;
+    i < rows.length;
+    i++
+  ){
+
+    const row =
+      rows[i] || [];
+
+
+    const name =
+      cellText(row[0]);
+
+
+    if(!name){
+      continue;
+    }
+
+
+    const runes =
+      cellText(row[2]);
+
+    const items =
+      cellText(row[3]);
+
+    const example =
+      cellText(row[4]);
+
+    const comments =
+      cellText(row[6]);
+
+
+    if(
+      !runes &&
+      !items &&
+      !example &&
+      !comments
+    ){
+
+      html +=
+        `
+          </tbody>
+        </table>
+      </div>
+
+      <div class="data-block">
+
+        <h3>
+          ${escapeHtml(name)}
+        </h3>
+
+        <table class="data-table">
+
+          <thead>
+            <tr>
+              <th>Build</th>
+              <th>Runes</th>
+              <th>Items</th>
+              <th>Example</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+
+          <tbody>
+        `;
+
+      continue;
+    }
+
+
+    html +=
+      `
+        <tr>
+
+          <td>
+            <strong style="
+              color:var(--rune-gold)
+            ">
+              ${escapeHtml(name)}
+            </strong>
+          </td>
+
+          <td>
+            ${escapeHtml(runes)}
+          </td>
+
+          <td>
+            ${escapeHtml(items)}
+          </td>
+
+          <td>
+            ${escapeHtml(example)}
+          </td>
+
+          <td>
+            ${escapeHtml(comments)}
+          </td>
+
+        </tr>
+      `;
+  }
+
+
+  html +=
+    `
+          </tbody>
+        </table>
+
+      </div>
+    `;
+
+
+  el.innerHTML =
+    html;
+}
+
+
+/* ============================================================
+   CONTENT / CREATORS
+   ============================================================ */
+
+function renderContent(rows){
+
+  const el =
+    document.getElementById(
+      "tab-content"
+    );
+
+
+  let html = "";
+  let i = 0;
+
+  const R =
+    rows || [];
+
+
+  while(i < R.length){
+
+    const row =
+      R[i] || [];
+
+
+    const cells =
+      row.map(cellText);
+
+
+    const nonEmptyCount =
+      cells.filter(
+        c => c
+      ).length;
+
+
+    if(
+      nonEmptyCount === 1 &&
+      cells[0] &&
+      cells[0].length > 3 &&
+      !/^(Region)$/.test(
+        cells[0]
+      )
+    ){
+
+      html +=
+        `
+          <div class="data-block">
+            <h3>
+              ${escapeHtml(
+                cells[0]
+              )}
+            </h3>
+        `;
+
+
+      i++;
+
+
+      const headerRow =
+        (R[i] || [])
+          .map(cellText);
+
+
+      if(
+        headerRow[0] ===
+        "Region"
+      ){
+
+        html +=
+          `
+            <table class="data-table">
+              <thead>
+                <tr>
+                  ${
+                    headerRow
+                      .filter(
+                        (h,idx) =>
+                          idx < 8
+                      )
+                      .map(
+                        h =>
+                          `<th>${escapeHtml(h)}</th>`
+                      )
+                      .join("")
+                  }
+                </tr>
+              </thead>
+
+              <tbody>
+          `;
+
+
+        i++;
+
+
+        while(
+          i < R.length
+        ){
+
+          const dr =
+            (R[i] || [])
+              .map(cellText);
+
+
+          if(
+            dr.filter(
+              c => c
+            ).length <= 1
+          ){
+            break;
+          }
+
+
+          html +=
+            `
+              <tr>
+                ${
+                  dr
+                    .slice(0,8)
+                    .map(
+                      c =>
+                        `<td>${escapeHtml(c)}</td>`
+                    )
+                    .join("")
+                }
+              </tr>
+            `;
+
+
+          i++;
+        }
+
+
+        html +=
+          `
+              </tbody>
+            </table>
+          `;
+      }
+
+
+      html +=
+        `
+          </div>
+        `;
+
+
+      continue;
+    }
+
+
+    i++;
+  }
+
+
+  el.innerHTML =
+    html ||
+    `<p style="
+      color:var(--ink-dim);
+      text-align:center;
+    ">
+      No data found.
+    </p>`;
+}
+
+
+/* ============================================================
+   PATCH NOTES / HOME
+   ============================================================ */
+
+function renderHome(rows){
+
+  const el =
+    document.getElementById(
+      "tab-home"
+    );
+
+
+  let html = "";
+
+
+  (rows || []).forEach(
+    row => {
+
+      const texts =
+        (row || [])
+          .map(cellText)
+          .filter(t => t);
+
+
+      if(!texts.length){
+        return;
+      }
+
+
+      html +=
+        `
+          <div class="paragraph-block">
+            ${
+              texts
+                .map(
+                  t =>
+                    escapeHtml(t)
+                )
+                .join(" — ")
+            }
+          </div>
+        `;
+    }
+  );
+
+
+  el.innerHTML =
+    html ||
+    `<p style="
+      color:var(--ink-dim);
+      text-align:center;
+    ">
+      No data found.
+    </p>`;
+}
+
+
+/* ============================================================
+   GAMES PAGE
+   ============================================================ */
+
+let wavState = null;
+
+
+function renderGamesPage(){
+
+  const el =
+    document.getElementById("tab-games");
+
+  if(!el){
+    return;
+  }
+
+  const storedBest =
+    parseInt(
+      localStorage.getItem("wavBest") || "0",
+      10
+    );
+
+  el.innerHTML =
+    `
+      <div class="games-page">
+
+        <div class="game-card" id="wav-card">
+
+          <h3>
+            Whack-a-Vayne
+          </h3>
+
+          <p>
+            She keeps peeking out of the shadows. Click her
+            before she slips back into stealth. 30 seconds,
+            as many hits as you can land.
+          </p>
+
+          <div class="wav-hud">
+            <div>Score <span id="wav-score">0</span></div>
+            <div>Time <span id="wav-time">30</span>s</div>
+            <div>Best <span id="wav-best">${storedBest}</span></div>
+          </div>
+
+          <div class="wav-grid" id="wav-grid"></div>
+
+          <button class="wav-btn" id="wav-start">
+            Start
+          </button>
+
+          <div class="wav-end" id="wav-end"></div>
+
+        </div>
+
+      </div>
+    `;
+
+
+  const grid =
+    document.getElementById("wav-grid");
+
+  grid.innerHTML =
+    Array.from(
+      {length:9},
+      (_,i) =>
+        `<div class="wav-hole" data-hole="${i}">
+          <img class="wav-vayne" alt="Vayne" draggable="false">
+        </div>`
+    ).join("");
+
+
+  const vayneIcon =
+    championSquareImage("Vayne");
+
+  if(vayneIcon){
+
+    grid
+      .querySelectorAll(".wav-vayne")
+      .forEach(img => {
+        img.src = vayneIcon;
+      });
+  }
+
+
+  grid
+    .querySelectorAll(".wav-hole")
+    .forEach(hole => {
+
+      hole.addEventListener(
+        "click",
+        () => whackHole(hole)
+      );
+
+    });
+
+
+  document
+    .getElementById("wav-start")
+    .addEventListener(
+      "click",
+      startWhackAVayne
+    );
+}
+
+
+function whackHole(hole){
+
+  if(!wavState || !wavState.running){
+    return;
+  }
+
+  if(!hole.classList.contains("active")){
+    return;
+  }
+
+  clearTimeout(hole._wavTimeout);
+
+  hole.classList.remove("active");
+  hole.classList.add("hit");
+
+  setTimeout(
+    () => hole.classList.remove("hit"),
+    150
+  );
+
+  wavState.score++;
+
+  document.getElementById("wav-score").textContent =
+    wavState.score;
+}
+
+
+function startWhackAVayne(){
+
+  const grid =
+    document.getElementById("wav-grid");
+
+  const holes =
+    Array.from(
+      grid.querySelectorAll(".wav-hole")
+    );
+
+  const startBtn =
     document.getElementById("wav-start");
 
-  const result =
-    document.getElementById("wav-result");
+  const endEl =
+    document.getElementById("wav-end");
 
-  if(start){
 
-    start.disabled = false;
-
-    start.textContent =
-      "Play Again";
+  if(wavState){
+    clearInterval(wavState.tickTimer);
+    clearTimeout(wavState.spawnTimer);
   }
 
-  if(result){
 
-    result.textContent =
-      `Time! You whacked Vayne ${
-        whackScore
-      } time${
-        whackScore === 1 ? "" : "s"
-      }.`;
+  holes.forEach(h => {
+    h.classList.remove("active","hit");
+    clearTimeout(h._wavTimeout);
+  });
+
+
+  endEl.textContent = "";
+  startBtn.disabled = true;
+  startBtn.textContent = "Whacking…";
+
+
+  wavState = {
+    running:true,
+    score:0,
+    timeLeft:30,
+    spawnTimer:null,
+    tickTimer:null
+  };
+
+
+  document.getElementById("wav-score").textContent = "0";
+  document.getElementById("wav-time").textContent = "30";
+
+
+  const spawnLoop = () => {
+
+    if(!wavState || !wavState.running){
+      return;
+    }
+
+    const idle =
+      holes.filter(
+        h => !h.classList.contains("active")
+      );
+
+    if(idle.length){
+
+      const hole =
+        idle[
+          Math.floor(Math.random() * idle.length)
+        ];
+
+      hole.classList.add("active");
+
+      const upTime =
+        500 + Math.random() * 500;
+
+      hole._wavTimeout =
+        setTimeout(() => {
+          hole.classList.remove("active");
+        },upTime);
+    }
+
+    const nextSpawn =
+      450 + Math.random() * 500;
+
+    wavState.spawnTimer =
+      setTimeout(spawnLoop,nextSpawn);
+  };
+
+
+  spawnLoop();
+
+
+  wavState.tickTimer =
+    setInterval(() => {
+
+      wavState.timeLeft--;
+
+      document.getElementById("wav-time").textContent =
+        Math.max(0,wavState.timeLeft);
+
+      if(wavState.timeLeft <= 0){
+        endWhackAVayne();
+      }
+
+    },1000);
+}
+
+
+function endWhackAVayne(){
+
+  if(!wavState){
+    return;
+  }
+
+  wavState.running = false;
+
+  clearInterval(wavState.tickTimer);
+  clearTimeout(wavState.spawnTimer);
+
+
+  const grid =
+    document.getElementById("wav-grid");
+
+  grid
+    .querySelectorAll(".wav-hole")
+    .forEach(h => {
+      h.classList.remove("active");
+      clearTimeout(h._wavTimeout);
+    });
+
+
+  const best =
+    parseInt(
+      localStorage.getItem("wavBest") || "0",
+      10
+    );
+
+  if(wavState.score > best){
+    localStorage.setItem("wavBest",wavState.score);
+  }
+
+  document.getElementById("wav-best").textContent =
+    Math.max(best,wavState.score);
+
+  document.getElementById("wav-end").textContent =
+    `Time's up — you landed ${wavState.score} hit${
+      wavState.score === 1 ? "" : "s"
+    } on Vayne.`;
+
+
+  const startBtn =
+    document.getElementById("wav-start");
+
+  startBtn.disabled = false;
+  startBtn.textContent = "Play again";
+}
+
+
+/* ============================================================
+   TABS
+   ============================================================ */
+
+function switchTab(tab){
+
+  activeTab =
+    tab;
+
+
+  document
+    .querySelectorAll(
+      "nav.tabs button[data-tab]"
+    )
+    .forEach(
+      b =>
+        b.classList.toggle(
+          "active",
+          b.dataset.tab === tab
+        )
+    );
+
+
+  matchupGrid.style.display =
+    tab === "matchup"
+      ? "grid"
+      : "none";
+
+
+  searchWrap.style.display =
+    tab === "matchup"
+      ? "block"
+      : "none";
+
+
+  document
+    .querySelectorAll(
+      ".tab-page"
+    )
+    .forEach(
+      p =>
+        p.style.display =
+          "none"
+    );
+
+
+  if(tab !== "matchup"){
+
+    const page =
+      document.getElementById(
+        "tab-" + tab
+      );
+
+    if(page){
+      page.style.display =
+        "block";
+    }
   }
 }
+
+
+tabnav.addEventListener(
+  "click",
+  e => {
+
+    const btn =
+      e.target.closest(
+        "button[data-tab]"
+      );
+
+    if(btn){
+
+      switchTab(
+        btn.dataset.tab
+      );
+
+      if(navToggle){
+        navToggle.classList.remove("open");
+      }
+
+      if(tabsInner){
+        tabsInner.classList.remove("open");
+      }
+    }
+
+  }
+);
+
+
+/* ============================================================
+   MOBILE NAV TOGGLE
+   ============================================================ */
+
+if(navToggle && tabsInner){
+
+  navToggle.addEventListener(
+    "click",
+    () => {
+      navToggle.classList.toggle("open");
+      tabsInner.classList.toggle("open");
+    }
+  );
+}
+
+
+/* ============================================================
+   SEARCH
+   ============================================================ */
+
+searchEl.addEventListener(
+  "input",
+  () => {
+
+    const q =
+      searchEl.value
+        .trim()
+        .toLowerCase();
+
+
+    const filtered =
+      q
+        ? champions.filter(
+            c =>
+              c.name
+                .toLowerCase()
+                .includes(q)
+          )
+        : champions;
+
+
+    renderMatchupGrid(
+      filtered
+    );
+  }
+);
+
+
+searchEl.addEventListener(
+  "keydown",
+  e => {
+
+    if(e.key === "Enter"){
+
+      const q =
+        searchEl.value
+          .trim()
+          .toLowerCase();
+
+
+      const match =
+        champions.find(
+          c =>
+            c.name
+              .toLowerCase()
+              .includes(q)
+        );
+
+
+      if(match){
+        openDetail(match);
+      }
+    }
+
+  }
+);
+
+
+/* ============================================================
+   MORDEKAISER MACE CURSOR
+
+   Body classes swap the CSS cursor (drawn in the stylesheet):
+   default resting mace, a raised mace on hover over anything
+   clickable, a swinging mace on mousedown, and — after the
+   page has sat idle for a while — the dim "Realm of Death"
+   mace plus a slow shadow veil over the whole page (Nightfall).
+   Any movement, click, key press, touch, or scroll cancels
+   Nightfall and restarts the idle clock.
+   ============================================================ */
+
+const NIGHTFALL_DELAY_MS = 6000;
+
+const HOVER_SELECTOR =
+  "a, button, input, textarea, .card, .icon-card, " +
+  ".wav-hole, [data-tab], .close-btn";
+
+let nightfallTimer = null;
+
+
+function clearNightfall(){
+
+  document.body.classList.remove("nightfall-active");
+
+  if(nightfallVeil){
+    nightfallVeil.classList.remove("show");
+  }
+}
+
+
+function armNightfall(){
+
+  clearTimeout(nightfallTimer);
+
+  nightfallTimer =
+    setTimeout(() => {
+
+      document.body.classList.add("nightfall-active");
+
+      if(nightfallVeil){
+        nightfallVeil.classList.add("show");
+      }
+
+    },NIGHTFALL_DELAY_MS);
+}
+
+
+function registerActivity(){
+  clearNightfall();
+  armNightfall();
+}
+
+
+[
+  "mousemove",
+  "mousedown",
+  "keydown",
+  "touchstart",
+  "scroll"
+].forEach(evt => {
+
+  window.addEventListener(
+    evt,
+    registerActivity,
+    {passive:true}
+  );
+
+});
+
+
+document.addEventListener(
+  "mouseover",
+  e => {
+
+    if(e.target.closest(HOVER_SELECTOR)){
+      document.body.classList.add("cursor-hover");
+    }
+
+  }
+);
+
+
+document.addEventListener(
+  "mouseout",
+  e => {
+
+    const stillOverHoverable =
+      e.relatedTarget &&
+      e.relatedTarget.closest &&
+      e.relatedTarget.closest(HOVER_SELECTOR);
+
+    if(
+      e.target.closest(HOVER_SELECTOR) &&
+      !stillOverHoverable
+    ){
+      document.body.classList.remove("cursor-hover");
+    }
+
+  }
+);
+
+
+document.addEventListener(
+  "mousedown",
+  () => {
+    document.body.classList.add("cursor-click");
+  }
+);
+
+
+document.addEventListener(
+  "mouseup",
+  () => {
+    document.body.classList.remove("cursor-click");
+  }
+);
+
+
+armNightfall();
+
+
+/* ============================================================
+   START
+   ============================================================ */
+
+fetchAll();
