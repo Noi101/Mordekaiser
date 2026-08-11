@@ -10,11 +10,6 @@
   --ink:#ede7dd;
   --ink-dim:#a79fb0;
   --hairline:#2a2732;
-
-  --mace-cursor:
-    url("data:image/svg+xml;utf8,<svg%20xmlns='http://www.w3.org/2000/svg'%20width='32'%20height='32'%20viewBox='0%200%2032%2032'><line%20x1='27'%20y1='29'%20x2='15'%20y2='17'%20stroke='%23c9a15a'%20stroke-width='3'%20stroke-linecap='round'/><line%20x1='27'%20y1='29'%20x2='15'%20y2='17'%20stroke='%236b5330'%20stroke-width='1'%20stroke-linecap='round'/><circle%20cx='10'%20cy='11'%20r='7.2'%20fill='%233e4a47'%20stroke='%234fe3b0'%20stroke-width='1.3'/><path%20d='M10%201.3%20L12.4%205.8%20L7.6%205.8%20Z'%20fill='%23c9a15a'/><path%20d='M19.6%204.7%20L17.3%209.2%20L21.8%208.1%20Z'%20fill='%23c9a15a'/><path%20d='M1%207.6%20L5.5%206.3%20L4.4%2010.8%20Z'%20fill='%23c9a15a'/><path%20d='M1.4%2014.9%20L5.9%2013.8%20L4.9%2018.3%20Z'%20fill='%23c9a15a'/><path%20d='M17.8%2017.4%20L15.4%2013.7%20L19.9%2013.4%20Z'%20fill='%23c9a15a'/><circle%20cx='10'%20cy='11'%20r='2.3'%20fill='%230b0a0d'/></svg>")
-    10 11,
-    auto;
 }
 
 *{box-sizing:border-box;}
@@ -40,22 +35,6 @@ body{
   color:var(--ink);
   font-family:'IBM Plex Sans',sans-serif;
   min-height:100vh;
-  cursor:var(--mace-cursor);
-}
-
-
-button,
-a,
-.card,
-.wav-hole,
-.wav-mole,
-.game-card{
-  cursor:var(--mace-cursor);
-}
-
-input,
-textarea{
-  cursor:text;
 }
 
 ::selection{
@@ -130,28 +109,30 @@ h1.title span{
   50%{opacity:0.35;}
 }
 
-/* ------------------------------------------------------------
-   Nav / tabs — desktop row, mobile hamburger dropdown
-   ------------------------------------------------------------ */
-
 nav.tabs{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  justify-content:center;
+  flex-wrap:wrap;
+  padding:18px 16px;
+  border-bottom:1px solid var(--hairline);
   position:sticky;
   top:0;
-  z-index:30;
   background:rgba(11,10,13,0.9);
   backdrop-filter:blur(10px);
-  border-bottom:1px solid var(--hairline);
-  padding:18px 16px;
+  z-index:30;
 }
 
-.tab-buttons{
+.tabs-inner{
   display:flex;
   gap:6px;
   justify-content:center;
   flex-wrap:wrap;
 }
 
-.tab-buttons button{
+nav.tabs button{
   font-family:'IBM Plex Mono',monospace;
   font-size:12px;
   letter-spacing:0.04em;
@@ -160,76 +141,20 @@ nav.tabs{
   color:var(--ink-dim);
   padding:9px 16px;
   border-radius:8px;
+  cursor:pointer;
   transition:all 0.15s ease;
 }
 
-.tab-buttons button:hover{
+nav.tabs button:hover{
   color:var(--ink);
   border-color:var(--spectral-dim);
 }
 
-.tab-buttons button.active{
+nav.tabs button.active{
   color:var(--bg-void);
   background:var(--spectral);
   border-color:var(--spectral);
   font-weight:600;
-}
-
-.hamburger{
-  display:none;
-  width:38px;
-  height:38px;
-  align-items:center;
-  justify-content:center;
-  flex-direction:column;
-  gap:5px;
-  background:var(--bg-stone);
-  border:1px solid var(--hairline);
-  border-radius:8px;
-  margin:0 0 0 auto;
-  cursor:var(--mace-cursor);
-}
-
-.hamburger span{
-  display:block;
-  width:18px;
-  height:2px;
-  background:var(--ink);
-  border-radius:2px;
-}
-
-@media(max-width:760px){
-
-  nav.tabs{
-    padding:12px 16px;
-    text-align:center;
-    position:sticky;
-  }
-
-  .hamburger{
-    display:inline-flex;
-    position:absolute;
-    right:16px;
-    top:10px;
-  }
-
-  .tab-buttons{
-    display:none;
-    flex-direction:column;
-    align-items:stretch;
-    gap:8px;
-    margin-top:12px;
-    text-align:left;
-  }
-
-  .tab-buttons.open{
-    display:flex;
-  }
-
-  .tab-buttons button{
-    width:100%;
-    padding:12px 14px;
-  }
 }
 
 .search-wrap{
@@ -248,7 +173,6 @@ nav.tabs{
   font-size:15px;
   color:var(--ink);
   outline:none;
-  cursor:text;
 }
 
 #search::placeholder{
@@ -311,6 +235,7 @@ main{
   border:1px solid var(--hairline);
   border-radius:12px;
   overflow:hidden;
+  cursor:pointer;
   position:relative;
   transition:
     transform 0.15s ease,
@@ -440,6 +365,7 @@ main{
   background:var(--bg-stone-2);
   color:var(--ink);
   font-size:16px;
+  cursor:pointer;
 }
 
 .close-btn:hover{
@@ -730,231 +656,7 @@ footer{
   font-size:11px;
 }
 
-
-/* ------------------------------------------------------------
-   Games list
-   ------------------------------------------------------------ */
-
-.games-list{
-  margin-bottom:28px;
-}
-
-.games-title{
-  font-family:'Cinzel',serif;
-  font-size:24px;
-  margin:0 0 14px;
-}
-
-.game-list-grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
-  gap:12px;
-}
-
-.game-card{
-  display:flex;
-  align-items:center;
-  gap:14px;
-  width:100%;
-  padding:15px;
-  text-align:left;
-  background:var(--bg-stone);
-  border:1px solid var(--hairline);
-  border-radius:10px;
-  color:var(--ink);
-  font:inherit;
-  cursor:var(--mace-cursor);
-  transition:transform .15s ease,border-color .15s ease,background .15s ease;
-}
-
-button.game-card:hover{
-  transform:translateY(-2px);
-  border-color:var(--spectral-dim);
-  background:var(--bg-stone-2);
-}
-
-.game-card.active{
-  border-color:var(--spectral-dim);
-}
-
-.game-card.disabled{
-  opacity:.55;
-  cursor:var(--mace-cursor);
-}
-
-.game-card-icon{
-  display:grid;
-  place-items:center;
-  width:40px;
-  height:40px;
-  flex:0 0 40px;
-  border-radius:8px;
-  background:var(--bg-stone-2);
-  color:var(--rune-gold);
-  font-size:20px;
-}
-
-.game-card strong,
-.game-card small{
-  display:block;
-}
-
-.game-card strong{
-  font-family:'Cinzel',serif;
-  margin-bottom:4px;
-}
-
-.game-card small{
-  color:var(--ink-dim);
-  line-height:1.4;
-}
-
-.wav-game{
-  padding-top:8px;
-}
-
-.wav-game h2{
-  font-family:'Cinzel',serif;
-  font-size:22px;
-  margin:0 0 8px;
-}
-
-/* ------------------------------------------------------------
-   Games tab — Whack-a-Vayne
-   ------------------------------------------------------------ */
-
-.wav-intro{
-  color:var(--ink-dim);
-  font-size:13px;
-  line-height:1.6;
-  margin:0 0 18px;
-  max-width:560px;
-}
-
-.wav-hud{
-  display:flex;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:22px;
-  margin-bottom:22px;
-  padding:14px 18px;
-  background:var(--bg-stone-2);
-  border:1px solid var(--hairline);
-  border-radius:10px;
-}
-
-.wav-stat{
-  display:flex;
-  flex-direction:column;
-}
-
-.wav-stat-label{
-  font-family:'IBM Plex Mono',monospace;
-  font-size:10px;
-  letter-spacing:0.1em;
-  text-transform:uppercase;
-  color:var(--ink-dim);
-  margin-bottom:2px;
-}
-
-.wav-stat-value{
-  font-family:'IBM Plex Mono',monospace;
-  font-size:18px;
-  font-weight:600;
-  color:var(--spectral);
-}
-
-.wav-start-btn{
-  margin-left:auto;
-  font-family:'IBM Plex Mono',monospace;
-  font-size:13px;
-  font-weight:600;
-  letter-spacing:0.04em;
-  padding:11px 22px;
-  border-radius:8px;
-  border:1px solid var(--spectral-dim);
-  background:var(--spectral);
-  color:var(--bg-void);
-}
-
-.wav-start-btn:disabled{
-  opacity:0.6;
-}
-
-.wav-board{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:16px;
-  max-width:520px;
-}
-
-.wav-hole{
-  position:relative;
-  aspect-ratio:1/1;
-  border-radius:50%;
-  background:
-    radial-gradient(circle at 50% 40%, #05100b 0%, var(--bg-stone-2) 70%);
-  border:1px solid var(--hairline);
-  overflow:hidden;
-}
-
-.wav-mound{
-  position:absolute;
-  inset:0;
-  border-radius:50%;
-  box-shadow:inset 0 -10px 18px rgba(0,0,0,0.55);
-  pointer-events:none;
-}
-
-.wav-mole{
-  position:absolute;
-  left:50%;
-  bottom:-15%;
-  width:74%;
-  height:74%;
-  transform:translate(-50%,20%);
-  border-radius:50%;
-  border:none;
-  padding:0;
-  background:transparent;
-  transition:transform 0.16s cubic-bezier(.2,.9,.3,1.3);
-  z-index:2;
-}
-
-.wav-mole img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  border-radius:50%;
-  border:2px solid var(--rune-gold);
-  box-shadow:0 0 0 0 rgba(79,227,176,0);
-  display:block;
-  pointer-events:none;
-}
-
-.wav-hole.up .wav-mole{
-  transform:translate(-50%,-8%);
-}
-
-.wav-hole.up .wav-mole img{
-  box-shadow:0 0 16px 2px rgba(79,227,176,0.45);
-}
-
-.wav-hole.hit .wav-mole img{
-  border-color:var(--rust);
-  box-shadow:0 0 22px 4px rgba(181,75,61,0.6);
-}
-
-.wav-result{
-  margin-top:16px;
-  font-family:'IBM Plex Mono',monospace;
-  font-size:13px;
-  color:var(--rune-gold);
-  min-height:18px;
-}
-
 @media(max-width:600px){
-
   .sheet-head{
     padding:20px;
     gap:14px;
@@ -976,19 +678,251 @@ button.game-card:hover{
   #matchup-grid{
     grid-template-columns:repeat(auto-fill,minmax(125px,1fr));
   }
+}
 
-  .wav-board{
-    max-width:100%;
-    gap:10px;
+/* ============================================================
+   MOBILE NAV (hamburger + collapsible tab list)
+   ============================================================ */
+
+.nav-toggle{
+  display:none;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  gap:5px;
+  width:38px;
+  height:34px;
+  background:transparent;
+  border:1px solid var(--hairline);
+  border-radius:8px;
+  cursor:pointer;
+  padding:0;
+}
+
+.nav-toggle span{
+  display:block;
+  width:18px;
+  height:2px;
+  background:var(--spectral);
+  border-radius:2px;
+  transition:transform .2s ease, opacity .2s ease;
+}
+
+.nav-toggle.open span:nth-child(1){
+  transform:translateY(7px) rotate(45deg);
+}
+
+.nav-toggle.open span:nth-child(2){
+  opacity:0;
+}
+
+.nav-toggle.open span:nth-child(3){
+  transform:translateY(-7px) rotate(-45deg);
+}
+
+@media(max-width:680px){
+
+  nav.tabs{
+    padding:12px 16px;
   }
 
-  .wav-hud{
-    gap:14px;
+  .nav-toggle{
+    display:flex;
   }
 
-  .wav-start-btn{
-    margin-left:0;
+  .tabs-inner{
+    flex-direction:column;
     width:100%;
-    order:10;
+    max-height:0;
+    overflow:hidden;
+    gap:0;
+    transition:max-height .28s ease;
   }
+
+  .tabs-inner.open{
+    max-height:420px;
+    padding-top:10px;
+  }
+
+  .tabs-inner button{
+    width:100%;
+    text-align:left;
+    margin-bottom:6px;
+  }
+}
+
+/* ============================================================
+   GAMES PAGE
+   ============================================================ */
+
+.games-page{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  gap:24px;
+}
+
+.game-card{
+  background:var(--bg-stone);
+  border:1px solid var(--hairline);
+  border-radius:14px;
+  padding:26px 24px;
+  text-align:center;
+}
+
+.game-card h3{
+  font-family:'Cinzel',serif;
+  font-size:20px;
+  color:var(--rune-gold);
+  margin:0 0 8px;
+}
+
+.game-card p{
+  color:var(--ink-dim);
+  font-size:13px;
+  line-height:1.6;
+  margin:0 0 18px;
+}
+
+.wav-hud{
+  display:flex;
+  justify-content:center;
+  gap:22px;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:13px;
+  color:var(--ink);
+  margin-bottom:16px;
+}
+
+.wav-hud span{
+  color:var(--spectral);
+  font-weight:600;
+}
+
+.wav-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:12px;
+  max-width:340px;
+  margin:0 auto 20px;
+}
+
+.wav-hole{
+  position:relative;
+  aspect-ratio:1/1;
+  border-radius:50%;
+  background:
+    radial-gradient(circle at 50% 40%,var(--bg-stone-2),var(--bg-void) 75%);
+  border:1px solid var(--hairline);
+  overflow:hidden;
+}
+
+.wav-vayne{
+  position:absolute;
+  left:50%;
+  bottom:-100%;
+  width:72%;
+  height:72%;
+  transform:translateX(-50%);
+  border-radius:50%;
+  object-fit:cover;
+  transition:bottom .12s ease-out;
+  pointer-events:none;
+}
+
+.wav-hole.active .wav-vayne{
+  bottom:10%;
+  pointer-events:auto;
+}
+
+.wav-hole.hit .wav-vayne{
+  filter:brightness(1.9) saturate(0.3);
+}
+
+.wav-btn{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:13px;
+  letter-spacing:0.05em;
+  background:var(--spectral);
+  color:var(--bg-void);
+  border:none;
+  padding:11px 24px;
+  border-radius:8px;
+  font-weight:600;
+}
+
+.wav-btn:hover{
+  background:var(--rune-gold);
+}
+
+.wav-btn:disabled{
+  opacity:0.6;
+}
+
+.wav-end{
+  font-family:'IBM Plex Mono',monospace;
+  color:var(--rune-gold);
+  font-size:13px;
+  margin-top:14px;
+  min-height:16px;
+}
+
+/* ============================================================
+   MORDEKAISER MACE CURSOR
+
+   Four hand-drawn (original SVG, not Riot assets) mace cursors
+   swapped via body classes: resting (default), raised (hover),
+   swinging (mousedown), and the dim "Realm of Death" mace shown
+   once the page goes idle (Nightfall).
+   ============================================================ */
+
+body,
+body *{
+  cursor:
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect x="14" y="18" width="4" height="12" rx="1" fill="%236b4a24" stroke="%230b0a0d" stroke-width="1"/><polygon points="16,0 17.5,5.3 22.4,2.6 19.7,7.5 25,9 19.7,10.5 22.4,15.4 17.5,12.7 16,18 14.5,12.7 9.6,15.4 12.3,10.5 7,9 12.3,7.5 9.6,2.6 14.5,5.3" fill="%234fe3b0" stroke="%230b0a0d" stroke-width="1.2"/></svg>')
+    16 4,
+    auto !important;
+}
+
+body.cursor-hover,
+body.cursor-hover *{
+  cursor:
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect x="14" y="18" width="4" height="12" rx="1" fill="%236b4a24" stroke="%230b0a0d" stroke-width="1"/><polygon points="16,0 17.5,5.3 22.4,2.6 19.7,7.5 25,9 19.7,10.5 22.4,15.4 17.5,12.7 16,18 14.5,12.7 9.6,15.4 12.3,10.5 7,9 12.3,7.5 9.6,2.6 14.5,5.3" fill="%23c9a15a" stroke="%230b0a0d" stroke-width="1.4"/></svg>')
+    16 4,
+    auto !important;
+}
+
+body.cursor-click,
+body.cursor-click *{
+  cursor:
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="rotate(28 16 9)"><rect x="14" y="18" width="4" height="12" rx="1" fill="%236b4a24" stroke="%230b0a0d" stroke-width="1"/><polygon points="16,0 17.5,5.3 22.4,2.6 19.7,7.5 25,9 19.7,10.5 22.4,15.4 17.5,12.7 16,18 14.5,12.7 9.6,15.4 12.3,10.5 7,9 12.3,7.5 9.6,2.6 14.5,5.3" fill="%23b54b3d" stroke="%230b0a0d" stroke-width="1.4"/></g></svg>')
+    16 4,
+    auto !important;
+}
+
+body.nightfall-active,
+body.nightfall-active *{
+  cursor:
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect x="14" y="18" width="4" height="12" rx="1" fill="%23241b2e" stroke="%234fe3b0" stroke-width="0.6"/><polygon points="16,0 17.5,5.3 22.4,2.6 19.7,7.5 25,9 19.7,10.5 22.4,15.4 17.5,12.7 16,18 14.5,12.7 9.6,15.4 12.3,10.5 7,9 12.3,7.5 9.6,2.6 14.5,5.3" fill="%23140f1a" stroke="%234fe3b0" stroke-width="0.8"/></svg>')
+    16 4,
+    auto !important;
+}
+
+.nightfall-veil{
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  pointer-events:none;
+  opacity:0;
+  background:
+    radial-gradient(
+      ellipse 60% 55% at 50% 50%,
+      transparent 0%,
+      rgba(6,4,10,0.55) 70%,
+      rgba(4,3,7,0.86) 100%
+    );
+  transition:opacity 1.4s ease;
+}
+
+.nightfall-veil.show{
+  opacity:1;
 }

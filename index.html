@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mordekaiser — Live Bibel V1</title>
+<title>Mordekaiser — Live Bibel</title>
 <link rel="stylesheet" href="Kaiser'sLook.CSS">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,6 +11,8 @@
 </head>
 
 <body>
+
+<div class="nightfall-veil" id="nightfall-veil"></div>
 
 <header class="hero">
   <div class="eyebrow">Live-synced Champion Reference</div>
@@ -31,19 +33,14 @@
 </header>
 
 <nav class="tabs" id="tabnav" style="display:none;">
-  <button
-    class="hamburger"
-    id="hamburger-btn"
-    type="button"
-    aria-label="Toggle menu"
-    aria-expanded="false"
-  >
+
+  <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
     <span></span>
     <span></span>
     <span></span>
   </button>
 
-  <div class="tab-buttons" id="tab-buttons">
+  <div class="tabs-inner" id="tabs-inner">
     <button data-tab="matchup" class="active">Matchup Guide</button>
     <button data-tab="itemization">Itemization</button>
     <button data-tab="runes">Rune Guide</button>
@@ -52,6 +49,7 @@
     <button data-tab="home">Patch Notes</button>
     <button data-tab="games">Games</button>
   </div>
+
 </nav>
 
 <div class="search-wrap" id="search-wrap" style="display:none;">
