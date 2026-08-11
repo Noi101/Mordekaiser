@@ -1,10 +1,9 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mordekaiser — Live Grimoire V3</title>
+<title>Mordekaiser — Live Bibel</title>
 <link rel="stylesheet" href="Kaiser'sLook.CSS">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,7 +16,7 @@
   <div class="eyebrow">Live-synced Champion Reference</div>
 
   <h1 class="title">
-    Mordekaiser <span>Grimoire</span>
+    Mordekaiser <span>Bibel</span>
   </h1>
 
   <p class="subtitle">
@@ -32,12 +31,27 @@
 </header>
 
 <nav class="tabs" id="tabnav" style="display:none;">
-  <button data-tab="matchup" class="active">Matchup Guide</button>
-  <button data-tab="itemization">Itemization</button>
-  <button data-tab="runes">Rune Guide</button>
-  <button data-tab="altsetups">Alternate Setups</button>
-  <button data-tab="content">Content / Creators</button>
-  <button data-tab="home">Patch Notes</button>
+  <button
+    class="hamburger"
+    id="hamburger-btn"
+    type="button"
+    aria-label="Toggle menu"
+    aria-expanded="false"
+  >
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
+
+  <div class="tab-buttons" id="tab-buttons">
+    <button data-tab="matchup" class="active">Matchup Guide</button>
+    <button data-tab="itemization">Itemization</button>
+    <button data-tab="runes">Rune Guide</button>
+    <button data-tab="altsetups">Alternate Setups</button>
+    <button data-tab="content">Content / Creators</button>
+    <button data-tab="home">Patch Notes</button>
+    <button data-tab="games">Games</button>
+  </div>
 </nav>
 
 <div class="search-wrap" id="search-wrap" style="display:none;">
@@ -59,6 +73,7 @@
   <div id="tab-altsetups" class="tab-page" style="display:none;"></div>
   <div id="tab-content" class="tab-page" style="display:none;"></div>
   <div id="tab-home" class="tab-page" style="display:none;"></div>
+  <div id="tab-games" class="tab-page" style="display:none;"></div>
 </main>
 
 <footer>
@@ -74,4 +89,3 @@
 
 </body>
 </html>
-```

@@ -14,7 +14,7 @@ const TAB_GIDS = {
   itemization: 1054535084,
   runes:       779082056,
   altsetups:   2121273139,
-  content:     1118043832
+  content:     225968364
 };
 
 
