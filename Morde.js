@@ -81,6 +81,29 @@ const nightfallVeil =
 let champions = [];
 let activeTab = "matchup";
 
+/*
+ * titleByKey: our tab keys (matchup, runes, etc.) mapped to the
+ * real sheet tab titles — set inside fetchAll(), reused by the
+ * xlsx importer to find the matching sheet inside an uploaded
+ * .xlsx export.
+ *
+ * liveRowsByKey: the last live rowsByKey fetched from the API —
+ * kept around so we can re-resolve "what name is at this row
+ * right now" whenever we need to check an xlsx image for
+ * staleness, without re-fetching.
+ *
+ * xlsxSnapshot / xlsxNameIndex: the parsed contents of a
+ * manually-uploaded .xlsx export. xlsxSnapshot holds raw
+ * {row,col,imageUrl,nameAtUpload} entries per tab; xlsxNameIndex
+ * is that same data indexed by lowercased name for fast lookup.
+ * Session-only — cleared on page reload, since re-uploading is
+ * how you refresh it anyway.
+ */
+let titleByKey = {};
+let liveRowsByKey = {};
+let xlsxSnapshot = {};
+let xlsxNameIndex = {};
+
 
 /* ============================================================
    HELPERS
@@ -181,6 +204,29 @@ function extractImageUrl(cell){
 
 function diffClass(n){
   return n === null ? "" : "diff-" + n;
+}
+
+
+/*
+ * cellLinkHtml: like cellText, but when the cell is a
+ * =HYPERLINK("url","label") formula, renders an actual
+ * clickable <a> instead of flattening it down to plain label
+ * text. Used anywhere we want links to stay clickable (Alt
+ * Setups, Content/Creators).
+ */
+function cellLinkHtml(cell){
+
+  const link =
+    extractHyperlink(cell);
+
+  if(link){
+    return (
+      `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener">` +
+      `${escapeHtml(link.label)}</a>`
+    );
+  }
+
+  return escapeHtml(cellText(cell));
 }
 
 
@@ -548,7 +594,7 @@ async function fetchAll(){
       );
     }
 
-    const titleByKey = {};
+    titleByKey = {};
 
     for(const key in TAB_GIDS){
 
@@ -616,6 +662,9 @@ async function fetchAll(){
     );
 
 
+    liveRowsByKey = rowsByKey;
+
+
     champions =
       parseChampions(
         rowsByKey.matchup
@@ -640,7 +689,8 @@ async function fetchAll(){
       "tab-runes",
       parseTextSections(
         rowsByKey.runes,
-        "rune"
+        "rune",
+        "runes"
       )
     );
 
@@ -661,6 +711,8 @@ async function fetchAll(){
 
 
     renderGamesPage();
+
+    renderSyncPage();
 
 
     syncLabel.textContent =
@@ -1030,6 +1082,9 @@ function openDetail(c){
   const d =
     c.difficulty;
 
+  const xlsxItems =
+    lookupXlsxImages("matchup",c.name);
+
 
   sheetContent.innerHTML =
     `
@@ -1058,7 +1113,40 @@ function openDetail(c){
 
           <h2>
             ${escapeHtml(c.name)}
+            <button
+              class="debug-link-toggle"
+              id="debug-link-toggle"
+              title="Show the image URL / lookup status for this champion"
+            >
+              🔗
+            </button>
           </h2>
+
+          <div
+            class="debug-link-row"
+            id="debug-link-row"
+            style="display:none;"
+          >
+            ${
+              c.portrait
+                ? `
+                  <input
+                    type="text"
+                    readonly
+                    value="${escapeHtml(c.portrait)}"
+                    id="debug-link-input"
+                  >
+                  <button id="debug-link-copy">Copy</button>
+                `
+                : `
+                  <span class="debug-link-missing">
+                    No Data Dragon match for "${escapeHtml(c.name)}" —
+                    check the spelling in the spreadsheet's "C:" name
+                    cell against Data Dragon's champion list.
+                  </span>
+                `
+            }
+          </div>
 
           <div class="vs">
             Mordekaiser vs. ${escapeHtml(c.name)}
@@ -1128,17 +1216,50 @@ function openDetail(c){
 
 
         ${
-          c.itemization
+          c.itemization || xlsxItems.length
             ? `
               <div class="section-title">
                 Itemization
               </div>
 
-              <pre class="item-text">${
-                escapeHtml(
-                  c.itemization
-                )
-              }</pre>
+              ${
+                xlsxItems.length
+                  ? `
+                    <div class="xlsx-item-row">
+                      ${
+                        xlsxItems.map(
+                          entry => `
+                            <div class="xlsx-item-chip">
+                              <img
+                                src="${entry.imageUrl}"
+                                alt=""
+                                loading="lazy"
+                              >
+                              ${
+                                isXlsxEntryStale("matchup",entry)
+                                  ? `<span class="stale-badge" title="This row's content has changed since your last .xlsx upload">!</span>`
+                                  : ""
+                              }
+                            </div>
+                          `
+                        ).join("")
+                      }
+                    </div>
+                  `
+                  : ""
+              }
+
+              ${
+                c.itemization
+                  ? `
+                    <pre class="item-text">${
+                      escapeHtml(
+                        c.itemization
+                      )
+                    }</pre>
+                  `
+                  : ""
+              }
             `
             : ""
         }
@@ -1175,6 +1296,55 @@ function openDetail(c){
       "click",
       closeDetail
     );
+
+
+  const debugToggle =
+    document.getElementById("debug-link-toggle");
+
+  const debugRow =
+    document.getElementById("debug-link-row");
+
+  if(debugToggle && debugRow){
+
+    debugToggle.addEventListener(
+      "click",
+      () => {
+        debugRow.style.display =
+          debugRow.style.display === "none"
+            ? "flex"
+            : "none";
+      }
+    );
+  }
+
+
+  const debugCopy =
+    document.getElementById("debug-link-copy");
+
+  if(debugCopy){
+
+    debugCopy.addEventListener(
+      "click",
+      () => {
+
+        const input =
+          document.getElementById("debug-link-input");
+
+        input.select();
+
+        if(navigator.clipboard){
+          navigator.clipboard.writeText(input.value);
+        }
+
+        debugCopy.textContent = "Copied!";
+
+        setTimeout(() => {
+          debugCopy.textContent = "Copy";
+        },1200);
+
+      }
+    );
+  }
 }
 
 
@@ -1238,7 +1408,7 @@ function detectPairColumns(row){
 }
 
 
-function parseTextSections(rows,iconType){
+function parseTextSections(rows,iconType,xlsxTabKey){
 
   const sections = [];
 
@@ -1340,6 +1510,7 @@ function parseTextSections(rows,iconType){
 
       let icon = directImage;
       let label = nameText;
+      let stale = false;
 
       if(!icon && nameText){
 
@@ -1370,12 +1541,31 @@ function parseTextSections(rows,iconType){
         }
       }
 
+      if(!icon && xlsxTabKey){
+
+        // Last-last resort: an image was pasted directly into
+        // the cell (not an =IMAGE() formula, not a name Data
+        // Dragon recognizes) — only readable from an uploaded
+        // .xlsx snapshot, matched by name.
+        const entry =
+          lookupXlsxImage(
+            xlsxTabKey,
+            label || explText
+          );
+
+        if(entry){
+          icon = entry.imageUrl;
+          stale = isXlsxEntryStale(xlsxTabKey,entry);
+        }
+      }
+
       if(icon || explText || label){
 
         current.items.push({
           icon:icon,
           label:label,
-          text:explText
+          text:explText,
+          stale:stale
         });
       }
 
@@ -1442,11 +1632,18 @@ function renderIconSections(containerId,sections){
                           ${
                             it.icon
                               ? `
-                                <img
-                                  src="${it.icon}"
-                                  alt=""
-                                  loading="lazy"
-                                >
+                                <div class="icon-img-wrap">
+                                  <img
+                                    src="${it.icon}"
+                                    alt=""
+                                    loading="lazy"
+                                  >
+                                  ${
+                                    it.stale
+                                      ? `<span class="stale-badge" title="This row's content has changed since your last .xlsx upload">!</span>`
+                                      : ""
+                                  }
+                                </div>
                               `
                               : `
                                 <div class="icon-placeholder">
@@ -1639,24 +1836,24 @@ function renderAltSetups(rows){
             <strong style="
               color:var(--rune-gold)
             ">
-              ${escapeHtml(name)}
+              ${cellLinkHtml(row[0])}
             </strong>
           </td>
 
           <td>
-            ${escapeHtml(runes)}
+            ${cellLinkHtml(row[2])}
           </td>
 
           <td>
-            ${escapeHtml(items)}
+            ${cellLinkHtml(row[3])}
           </td>
 
           <td>
-            ${escapeHtml(example)}
+            ${cellLinkHtml(row[4])}
           </td>
 
           <td>
-            ${escapeHtml(comments)}
+            ${cellLinkHtml(row[6])}
           </td>
 
         </tr>
@@ -1777,9 +1974,11 @@ function renderContent(rows){
           i < R.length
         ){
 
+          const rawDr =
+            R[i] || [];
+
           const dr =
-            (R[i] || [])
-              .map(cellText);
+            rawDr.map(cellText);
 
 
           if(
@@ -1795,11 +1994,11 @@ function renderContent(rows){
             `
               <tr>
                 ${
-                  dr
+                  rawDr
                     .slice(0,8)
                     .map(
                       c =>
-                        `<td>${escapeHtml(c)}</td>`
+                        `<td>${cellLinkHtml(c)}</td>`
                     )
                     .join("")
                 }
@@ -1898,6 +2097,661 @@ function renderHome(rows){
     ">
       No data found.
     </p>`;
+}
+
+
+/* ============================================================
+   XLSX SNAPSHOT ENGINE
+
+   Some images (pasted directly into cells with Sheets' "insert
+   image in cell" feature, not an =IMAGE() formula) can't be read
+   through the Sheets API at all — the API just returns nothing
+   for that cell. The only way to get the actual picture is to
+   export the sheet as .xlsx (which bundles real image files)
+   and read it locally.
+
+   The flow: you export → .xlsx from Google Sheets, upload it on
+   the Data Sync tab, and we dig through the file's internal XML
+   to find every embedded image, which row/column it's anchored
+   to, and — by cross-referencing that row against the live data
+   we already fetched — what champion/rune/item it belongs to.
+
+   Because that mapping is captured once at upload time, if the
+   live sheet later changes what's sitting in that row, we can
+   tell the image is now stale (isXlsxEntryStale) just by
+   re-checking what name is at that row *now* vs. what it was
+   *at upload time*. No stored image data is compared — only the
+   row's identity — which is intentionally simple.
+
+   NOTE: this is session-only. Nothing is persisted across page
+   reloads (images are held as in-memory blob URLs), which is
+   also why the tab always starts back at "no snapshot uploaded".
+   ============================================================ */
+
+function resolveMatchupRowName(rowIndex){
+
+  const rows =
+    liveRowsByKey.matchup || [];
+
+  let owner = null;
+
+  for(
+    let i = 0;
+    i < rows.length && i <= rowIndex;
+    i++
+  ){
+
+    const a =
+      cellText((rows[i] || [])[0]);
+
+    if(
+      a &&
+      a.toLowerCase().startsWith("c:")
+    ){
+      owner = a.slice(2).trim();
+    }
+  }
+
+  return owner;
+}
+
+
+/*
+ * Approximate: the runes tab repeats [Name][Explanation] column
+ * pairs at different offsets per section, so rather than fully
+ * re-deriving the header layout here too, we just scan a small
+ * window of columns around where the image was anchored for any
+ * text — in practice that's either the name cell itself or the
+ * explanation cell right beside it.
+ */
+function resolveIconRowName(tabKey,rowIndex,col){
+
+  const rows =
+    liveRowsByKey[tabKey] || [];
+
+  const row =
+    rows[rowIndex] || [];
+
+  for(const delta of [0,-1,1,-2,2]){
+
+    const text =
+      cellText(row[col + delta]);
+
+    if(text){
+      return text;
+    }
+  }
+
+  return null;
+}
+
+
+function rebuildXlsxNameIndex(){
+
+  xlsxNameIndex = {};
+
+  for(const tabKey in xlsxSnapshot){
+
+    xlsxNameIndex[tabKey] = {};
+
+    xlsxSnapshot[tabKey].forEach(entry => {
+
+      const key =
+        (entry.nameAtUpload || "")
+          .trim()
+          .toLowerCase();
+
+      if(!key){
+        return;
+      }
+
+      if(!xlsxNameIndex[tabKey][key]){
+        xlsxNameIndex[tabKey][key] = [];
+      }
+
+      xlsxNameIndex[tabKey][key].push(entry);
+    });
+
+    Object.values(
+      xlsxNameIndex[tabKey]
+    ).forEach(
+      list =>
+        list.sort(
+          (a,b) =>
+            a.row - b.row ||
+            a.col - b.col
+        )
+    );
+  }
+}
+
+
+function lookupXlsxImage(tabKey,name){
+
+  const matches =
+    lookupXlsxImages(tabKey,name);
+
+  return matches.length ? matches[0] : null;
+}
+
+
+function lookupXlsxImages(tabKey,name){
+
+  const key =
+    (name || "").trim().toLowerCase();
+
+  if(!key){
+    return [];
+  }
+
+  const bucket =
+    xlsxNameIndex[tabKey] &&
+    xlsxNameIndex[tabKey][key];
+
+  return bucket || [];
+}
+
+
+function isXlsxEntryStale(tabKey,entry){
+
+  const currentName =
+    tabKey === "matchup"
+      ? resolveMatchupRowName(entry.row)
+      : resolveIconRowName(tabKey,entry.row,entry.col);
+
+  if(!currentName){
+    return true;
+  }
+
+  return (
+    currentName.trim().toLowerCase() !==
+    (entry.nameAtUpload || "").trim().toLowerCase()
+  );
+}
+
+
+function computeStaleSummary(){
+
+  const list = [];
+
+  ["matchup","runes"].forEach(tabKey => {
+
+    (xlsxSnapshot[tabKey] || []).forEach(entry => {
+
+      if(isXlsxEntryStale(tabKey,entry)){
+
+        list.push({
+          tab:tabKey,
+          uploadedName:entry.nameAtUpload || "(unrecognized row)"
+        });
+      }
+
+    });
+
+  });
+
+  return list;
+}
+
+
+/*
+ * resolvePath: resolves a relative OOXML "Target" path (e.g.
+ * "../media/image3.png") against the folder the relationship
+ * file lives in.
+ */
+function resolvePath(baseFolder,relativeTarget){
+
+  if(relativeTarget.startsWith("/")){
+    return relativeTarget.replace(/^\//,"");
+  }
+
+  const parts =
+    baseFolder.split("/");
+
+  relativeTarget
+    .split("/")
+    .forEach(part => {
+
+      if(part === ".."){
+        parts.pop();
+      }else if(part !== "."){
+        parts.push(part);
+      }
+
+    });
+
+  return parts.join("/");
+}
+
+
+const OOXML_REL_NS =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+
+async function readSheetImageAnchors(zip,sheetPath,tabKey){
+
+  const folder =
+    sheetPath.substring(0,sheetPath.lastIndexOf("/"));
+
+  const fileName =
+    sheetPath.substring(sheetPath.lastIndexOf("/") + 1);
+
+  const sheetRelsFile =
+    zip.file(`${folder}/_rels/${fileName}.rels`);
+
+  if(!sheetRelsFile){
+    return [];
+  }
+
+  const sheetRelsDoc =
+    new DOMParser().parseFromString(
+      await sheetRelsFile.async("string"),
+      "application/xml"
+    );
+
+  let drawingTarget = null;
+
+  sheetRelsDoc
+    .querySelectorAll("Relationship")
+    .forEach(r => {
+
+      if((r.getAttribute("Type") || "").endsWith("/drawing")){
+        drawingTarget = r.getAttribute("Target");
+      }
+
+    });
+
+  if(!drawingTarget){
+    return [];
+  }
+
+  const drawingPath =
+    resolvePath(folder,drawingTarget);
+
+  const drawingFile =
+    zip.file(drawingPath);
+
+  if(!drawingFile){
+    return [];
+  }
+
+  const drawingDoc =
+    new DOMParser().parseFromString(
+      await drawingFile.async("string"),
+      "application/xml"
+    );
+
+  const drawingFolder =
+    drawingPath.substring(0,drawingPath.lastIndexOf("/"));
+
+  const drawingFileName =
+    drawingPath.substring(drawingPath.lastIndexOf("/") + 1);
+
+  const drawingRelsFile =
+    zip.file(`${drawingFolder}/_rels/${drawingFileName}.rels`);
+
+  const embedTargets = {};
+
+  if(drawingRelsFile){
+
+    const drawingRelsDoc =
+      new DOMParser().parseFromString(
+        await drawingRelsFile.async("string"),
+        "application/xml"
+      );
+
+    drawingRelsDoc
+      .querySelectorAll("Relationship")
+      .forEach(r => {
+        embedTargets[r.getAttribute("Id")] =
+          r.getAttribute("Target");
+      });
+  }
+
+  const anchors =
+    drawingDoc.getElementsByTagNameNS("*","twoCellAnchor").length
+      ? Array.from(drawingDoc.getElementsByTagNameNS("*","twoCellAnchor"))
+      : Array.from(drawingDoc.getElementsByTagNameNS("*","oneCellAnchor"));
+
+  const entries = [];
+
+  for(const anchor of anchors){
+
+    const fromEl =
+      anchor.getElementsByTagNameNS("*","from")[0];
+
+    if(!fromEl){
+      continue;
+    }
+
+    const colEl =
+      fromEl.getElementsByTagNameNS("*","col")[0];
+
+    const rowEl =
+      fromEl.getElementsByTagNameNS("*","row")[0];
+
+    const col =
+      parseInt(colEl ? colEl.textContent : "0",10);
+
+    const row =
+      parseInt(rowEl ? rowEl.textContent : "0",10);
+
+    const blip =
+      anchor.getElementsByTagNameNS("*","blip")[0];
+
+    if(!blip){
+      continue;
+    }
+
+    const rEmbed =
+      blip.getAttributeNS(OOXML_REL_NS,"embed") ||
+      blip.getAttribute("r:embed");
+
+    const target =
+      embedTargets[rEmbed];
+
+    if(!target){
+      continue;
+    }
+
+    const mediaPath =
+      resolvePath(drawingFolder,target);
+
+    const mediaFile =
+      zip.file(mediaPath);
+
+    if(!mediaFile){
+      continue;
+    }
+
+    const blob =
+      await mediaFile.async("blob");
+
+    const imageUrl =
+      URL.createObjectURL(blob);
+
+    const nameAtUpload =
+      tabKey === "matchup"
+        ? resolveMatchupRowName(row)
+        : resolveIconRowName(tabKey,row,col);
+
+    entries.push({
+      row:row,
+      col:col,
+      imageUrl:imageUrl,
+      nameAtUpload:nameAtUpload
+    });
+  }
+
+  return entries;
+}
+
+
+async function loadXlsxSnapshot(file){
+
+  if(typeof JSZip === "undefined"){
+    throw new Error(
+      "JSZip didn't load — check your connection and try again."
+    );
+  }
+
+  const zip =
+    await JSZip.loadAsync(file);
+
+  const workbookFile =
+    zip.file("xl/workbook.xml");
+
+  const workbookRelsFile =
+    zip.file("xl/_rels/workbook.xml.rels");
+
+  if(!workbookFile || !workbookRelsFile){
+    throw new Error(
+      "That doesn't look like a valid .xlsx file."
+    );
+  }
+
+  const wbDoc =
+    new DOMParser().parseFromString(
+      await workbookFile.async("string"),
+      "application/xml"
+    );
+
+  const relsDoc =
+    new DOMParser().parseFromString(
+      await workbookRelsFile.async("string"),
+      "application/xml"
+    );
+
+  const relTargets = {};
+
+  relsDoc
+    .querySelectorAll("Relationship")
+    .forEach(r => {
+      relTargets[r.getAttribute("Id")] =
+        r.getAttribute("Target");
+    });
+
+  const sheetPaths = {};
+
+  wbDoc
+    .querySelectorAll("sheet")
+    .forEach(s => {
+
+      const name =
+        s.getAttribute("name");
+
+      const rid =
+        s.getAttributeNS(OOXML_REL_NS,"id") ||
+        s.getAttribute("r:id");
+
+      const target =
+        relTargets[rid];
+
+      if(name && target){
+        sheetPaths[name] =
+          "xl/" + target.replace(/^\/?/,"");
+      }
+
+    });
+
+  const wanted = {
+    matchup:titleByKey.matchup,
+    runes:titleByKey.runes
+  };
+
+  const snapshot = {};
+
+  for(const key in wanted){
+
+    const title =
+      wanted[key];
+
+    const path =
+      title ? sheetPaths[title] : null;
+
+    if(!path){
+      snapshot[key] = [];
+      continue;
+    }
+
+    snapshot[key] =
+      await readSheetImageAnchors(zip,path,key);
+  }
+
+  return snapshot;
+}
+
+
+function renderSyncPage(){
+
+  const el =
+    document.getElementById("tab-sync");
+
+  if(!el){
+    return;
+  }
+
+  const hasSnapshot =
+    Object.keys(xlsxSnapshot).some(
+      k => (xlsxSnapshot[k] || []).length
+    );
+
+  const staleList =
+    computeStaleSummary();
+
+  el.innerHTML =
+    `
+      <div class="sync-page">
+
+        <div class="sync-card">
+
+          <h3>
+            Image Snapshot Sync
+          </h3>
+
+          <p>
+            Live text always comes straight from the spreadsheet.
+            Some images — item icons pasted directly into the
+            Matchup tab, and rune icons pasted into the Runes tab —
+            can't be read through the Sheets API at all, so upload
+            a fresh <code>.xlsx</code> export of the sheet here
+            whenever you update those pictures.
+          </p>
+
+          <input
+            type="file"
+            id="xlsx-input"
+            accept=".xlsx"
+          >
+
+          <div class="sync-status" id="sync-status">
+            ${
+              hasSnapshot
+                ? "Snapshot loaded for this session."
+                : "No snapshot uploaded yet — pasted-in images will show as blank until you upload one."
+            }
+          </div>
+
+          <button
+            class="wav-btn"
+            id="xlsx-clear"
+            ${hasSnapshot ? "" : "disabled"}
+          >
+            Clear snapshot
+          </button>
+
+          <p class="sync-disclaimer">
+            Uploaded images are a snapshot from the moment you
+            exported the file — they can drift out of sync with
+            the live sheet over time. Anything listed below has
+            changed on the live sheet since your last upload, so
+            treat that image as possibly outdated; it'll disappear
+            from this list on its own once the data lines up again.
+          </p>
+
+          <div id="sync-stale-list">
+            ${
+              staleList.length
+                ? `
+                  <ul>
+                    ${
+                      staleList.map(
+                        s => `
+                          <li>
+                            <strong>${escapeHtml(s.uploadedName)}</strong>
+                            (${escapeHtml(s.tab)} tab) —
+                            row content has changed since upload
+                          </li>
+                        `
+                      ).join("")
+                    }
+                  </ul>
+                `
+                : hasSnapshot
+                  ? `<p class="sync-ok">Everything lines up — no stale images right now.</p>`
+                  : ""
+            }
+          </div>
+
+        </div>
+
+      </div>
+    `;
+
+  document
+    .getElementById("xlsx-input")
+    .addEventListener("change",handleXlsxUpload);
+
+  const clearBtn =
+    document.getElementById("xlsx-clear");
+
+  if(clearBtn){
+
+    clearBtn.addEventListener("click",() => {
+
+      xlsxSnapshot = {};
+      xlsxNameIndex = {};
+
+      renderSyncPage();
+
+      renderIconSections(
+        "tab-runes",
+        parseTextSections(
+          liveRowsByKey.runes,
+          "rune",
+          "runes"
+        )
+      );
+
+    });
+  }
+}
+
+
+async function handleXlsxUpload(e){
+
+  const file =
+    e.target.files[0];
+
+  if(!file){
+    return;
+  }
+
+  const statusEl =
+    document.getElementById("sync-status");
+
+  if(statusEl){
+    statusEl.textContent =
+      "Reading file…";
+  }
+
+  try{
+
+    xlsxSnapshot =
+      await loadXlsxSnapshot(file);
+
+    rebuildXlsxNameIndex();
+
+    renderIconSections(
+      "tab-runes",
+      parseTextSections(
+        liveRowsByKey.runes,
+        "rune",
+        "runes"
+      )
+    );
+
+    renderSyncPage();
+
+  }catch(err){
+
+    console.error(err);
+
+    if(statusEl){
+      statusEl.textContent =
+        "Couldn't read that file: " + err.message;
+    }
+  }
 }
 
 
