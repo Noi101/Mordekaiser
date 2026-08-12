@@ -48,6 +48,7 @@
     <button data-tab="content">Content / Creators</button>
     <button data-tab="home">Patch Notes</button>
     <button data-tab="games">Games</button>
+    <button data-tab="sync">Data Sync</button>
   </div>
 
 </nav>
@@ -72,6 +73,7 @@
   <div id="tab-content" class="tab-page" style="display:none;"></div>
   <div id="tab-home" class="tab-page" style="display:none;"></div>
   <div id="tab-games" class="tab-page" style="display:none;"></div>
+  <div id="tab-sync" class="tab-page" style="display:none;"></div>
 </main>
 
 <footer>
@@ -83,7 +85,15 @@
   <div class="sheet" id="sheet-content"></div>
 </div>
 
-<script src="Morde.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!--
+  Split into two files: app.js holds the spreadsheet sync/render
+  logic (still the "brains" of the page), games.js holds every
+  arcade game. app.js must load first — games.js calls back into
+  helpers it defines (championImage, findRuneData, ddragon*, etc).
+-->
+<script src="app.js"></script>
+<script src="games.js"></script>
 
 </body>
 </html>

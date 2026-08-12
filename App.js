@@ -98,11 +98,19 @@ let activeTab = "matchup";
  * is that same data indexed by lowercased name for fast lookup.
  * Session-only — cleared on page reload, since re-uploading is
  * how you refresh it anyway.
+ *
+ * lastSyncWarnings: non-fatal problems found on the last xlsx
+ * upload (e.g. a tab that had no embedded images, or a sheet
+ * name that didn't match) — this is what used to fail silently.
+ * A failed upload throws and shows an error; a "succeeded but
+ * found nothing useful" upload now shows these warnings instead
+ * of just quietly doing nothing.
  */
 let titleByKey = {};
 let liveRowsByKey = {};
 let xlsxSnapshot = {};
 let xlsxNameIndex = {};
+let lastSyncWarnings = [];
 
 
 /* ============================================================
@@ -125,6 +133,44 @@ function normalizeName(name){
     .replace(/[’']/g,"")
     .replace(/&/g,"and")
     .replace(/[^a-z0-9]/g,"");
+}
+
+
+/*
+ * Plain Levenshtein edit distance, used only as a last-resort
+ * fuzzy fallback when looking up champion art (see
+ * findChampionData below) so a small typo in the spreadsheet's
+ * "C:" name cell — "Ganglank" instead of "Gangplank" — doesn't
+ * just silently fail to find a portrait. Generic on purpose:
+ * this isn't a hardcoded fix for one champion, it protects
+ * against the same kind of typo for any champion, now or later.
+ */
+function levenshtein(a,b){
+
+  const m = a.length;
+  const n = b.length;
+
+  const dp =
+    Array.from({length:m + 1},() => new Array(n + 1).fill(0));
+
+  for(let i = 0; i <= m; i++){ dp[i][0] = i; }
+  for(let j = 0; j <= n; j++){ dp[0][j] = j; }
+
+  for(let i = 1; i <= m; i++){
+    for(let j = 1; j <= n; j++){
+
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(
+              dp[i - 1][j],
+              dp[i][j - 1],
+              dp[i - 1][j - 1]
+            );
+    }
+  }
+
+  return dp[m][n];
 }
 
 
@@ -227,6 +273,129 @@ function cellLinkHtml(cell){
   }
 
   return escapeHtml(cellText(cell));
+}
+
+
+/*
+ * parseConditionalBlocks: turns a free-text cell like
+
+     Standard: Comet -> ... -> Bone Plating
+     If he builds full tank, swap Comet for Grasp.
+     If he's ahead, Conqueror is fine instead.
+
+ * into a lead paragraph plus a list of labeled condition
+ * blocks. This isn't specific to any one champion — any
+ * matchup's rune build or itemization text can use one or more
+ * "If ..." lines and it'll render as its own card instead of
+ * getting mashed into one paragraph. Right now Aatrox might be
+ * the only one written that way in the sheet, but the parser
+ * doesn't care who it is — it just looks for the pattern, so it
+ * keeps working as more matchups get conditional notes added.
+ */
+function parseConditionalBlocks(text){
+
+  if(!text){
+    return {lead:"",conditions:[]};
+  }
+
+  const lines =
+    text
+      .split(/\n+/)
+      .map(l => l.trim())
+      .filter(Boolean);
+
+  const lead = [];
+  const conditions = [];
+  let current = null;
+
+  lines.forEach(line => {
+
+    if(/^if\b/i.test(line)){
+
+      if(current){
+        conditions.push(current);
+      }
+
+      const m =
+        line.match(/^(if\s[^,:]+)[,:]?\s*(.*)$/i);
+
+      current = {
+        label: m ? m[1].trim() : line,
+        text: m && m[2] ? m[2].trim() : ""
+      };
+
+    }else if(current){
+
+      current.text =
+        current.text
+          ? current.text + " " + line
+          : line;
+
+    }else{
+      lead.push(line);
+    }
+  });
+
+  if(current){
+    conditions.push(current);
+  }
+
+  return {
+    lead:lead.join(" "),
+    conditions:conditions
+  };
+}
+
+
+/*
+ * renderConditionalHtml: renders parseConditionalBlocks() output
+ * — plain paragraph for the lead text, then a styled card per
+ * "If ..." condition. Falls back to the old plain <pre> block
+ * when there's nothing conditional in the text at all, so
+ * ordinary matchups look exactly like they did before.
+ */
+function renderConditionalHtml(text,className){
+
+  const parsed =
+    parseConditionalBlocks(text);
+
+  if(!parsed.conditions.length){
+
+    return text
+      ? `<pre class="${className}">${escapeHtml(text)}</pre>`
+      : "";
+  }
+
+  let html = "";
+
+  if(parsed.lead){
+    html +=
+      `<pre class="${className}">${escapeHtml(parsed.lead)}</pre>`;
+  }
+
+  html +=
+    `
+      <div class="conditional-list">
+        ${
+          parsed.conditions.map(
+            c => `
+              <div class="conditional-card">
+                <div class="conditional-label">
+                  ${escapeHtml(c.label)}
+                </div>
+                ${
+                  c.text
+                    ? `<div class="conditional-text">${escapeHtml(c.text)}</div>`
+                    : ""
+                }
+              </div>
+            `
+          ).join("")
+        }
+      </div>
+    `;
+
+  return html;
 }
 
 
@@ -392,7 +561,39 @@ function findChampionData(name){
     return ddragonChampions[aliases[wanted]];
   }
 
-  return null;
+  /*
+   * Fuzzy fallback: catches small typos in the spreadsheet's
+   * "C:" name cell (e.g. "Ganglank" vs "Gangplank") instead of
+   * just showing no portrait. Only accepts close matches — edit
+   * distance capped at ~20% of the candidate's length, and the
+   * lengths have to be close to begin with — so it can't
+   * accidentally snap to an unrelated champion. If your
+   * spreadsheet name is spelled correctly and this still
+   * doesn't resolve, click the 🔗 debug link on that champion's
+   * detail card — it shows exactly what name we tried to match.
+   */
+  let fuzzyBest = null;
+  let fuzzyDist = Infinity;
+
+  for(const key in ddragonChampions){
+
+    const champ = ddragonChampions[key];
+    const candidate = normalizeName(champ.name);
+
+    if(Math.abs(candidate.length - wanted.length) > 2){
+      continue;
+    }
+
+    const dist = levenshtein(wanted,candidate);
+    const limit = Math.max(1,Math.floor(candidate.length * 0.2));
+
+    if(dist <= limit && dist < fuzzyDist){
+      fuzzyDist = dist;
+      fuzzyBest = champ;
+    }
+  }
+
+  return fuzzyBest;
 }
 
 
@@ -676,13 +877,21 @@ async function fetchAll(){
     );
 
 
-    renderIconSections(
-      "tab-itemization",
+    const itemizationSections =
       parseTextSections(
         rowsByKey.itemization,
         "item"
-      )
+      );
+
+    renderIconSections(
+      "tab-itemization",
+      itemizationSections
     );
+
+    itemizationFlat =
+      itemizationSections
+        .flatMap(s => s.items)
+        .filter(it => it.icon && it.label && it.text);
 
 
     renderIconSections(
@@ -835,7 +1044,10 @@ function parseChampions(rows){
 
     /*
      * Get the champion image from Data Dragon,
-     * NOT from Google Sheets.
+     * NOT from Google Sheets. If the "C:" name has a typo,
+     * findChampionData's fuzzy fallback will usually still
+     * resolve it — but the name shown on the card always comes
+     * straight from this cell, exactly as typed in the sheet.
      */
     const portrait =
       championImage(
@@ -1141,8 +1353,10 @@ function openDetail(c){
                 : `
                   <span class="debug-link-missing">
                     No Data Dragon match for "${escapeHtml(c.name)}" —
-                    check the spelling in the spreadsheet's "C:" name
-                    cell against Data Dragon's champion list.
+                    double check the spelling in the spreadsheet's "C:" name
+                    cell against Data Dragon's champion list. Small typos
+                    are usually forgiven automatically; this means the
+                    name is too far off for the fuzzy match to trust.
                   </span>
                 `
             }
@@ -1205,11 +1419,7 @@ function openDetail(c){
                 Rune Build
               </div>
 
-              <pre class="rune-text">${
-                escapeHtml(
-                  c.runeBuild
-                )
-              }</pre>
+              ${renderConditionalHtml(c.runeBuild,"rune-text")}
             `
             : ""
         }
@@ -1251,13 +1461,7 @@ function openDetail(c){
 
               ${
                 c.itemization
-                  ? `
-                    <pre class="item-text">${
-                      escapeHtml(
-                        c.itemization
-                      )
-                    }</pre>
-                  `
+                  ? renderConditionalHtml(c.itemization,"item-text")
                   : ""
               }
             `
@@ -2126,6 +2330,15 @@ function renderHome(rows){
    NOTE: this is session-only. Nothing is persisted across page
    reloads (images are held as in-memory blob URLs), which is
    also why the tab always starts back at "no snapshot uploaded".
+
+   WHERE THE UPLOADED FILE IS USED: it only backs the Matchup
+   tab's itemization chips and the Runes tab icon grid — anywhere
+   a cell has an image pasted in directly rather than typed as a
+   name or an =IMAGE() formula (see the "last-last resort" branch
+   in parseTextSections and the xlsxItems lookup in openDetail).
+   All the *text* on every tab always comes straight from the
+   live Sheets API call in fetchAll(), never from the upload —
+   the upload is strictly an image patch, not a data source.
    ============================================================ */
 
 function resolveMatchupRowName(rowIndex){
@@ -2560,7 +2773,17 @@ async function loadXlsxSnapshot(file){
   };
 
   const snapshot = {};
+  const warnings = [];
 
+  /*
+   * This is the part that used to be a silent no-op: if the
+   * uploaded file didn't have a sheet matching our live tab
+   * title (wrong export, renamed tab, etc.) we'd just set an
+   * empty array and move on — the upload looked "successful"
+   * with nothing to show for it and no way to know why. Now
+   * every gap gets a warning that renderSyncPage actually
+   * displays.
+   */
   for(const key in wanted){
 
     const title =
@@ -2570,15 +2793,34 @@ async function loadXlsxSnapshot(file){
       title ? sheetPaths[title] : null;
 
     if(!path){
+
       snapshot[key] = [];
+
+      warnings.push(
+        `Couldn't find a sheet named "${title || key}" inside this ` +
+        `file — make sure you exported the same spreadsheet that's ` +
+        `live-synced, with tab names unchanged.`
+      );
+
       continue;
     }
 
-    snapshot[key] =
+    const entries =
       await readSheetImageAnchors(zip,path,key);
+
+    snapshot[key] = entries;
+
+    if(!entries.length){
+
+      warnings.push(
+        `The "${title}" tab was found, but this file has no ` +
+        `embedded images on it — nothing pasted directly into a cell ` +
+        `there to read.`
+      );
+    }
   }
 
-  return snapshot;
+  return {snapshot,warnings};
 }
 
 
@@ -2631,6 +2873,20 @@ function renderSyncPage(){
                 : "No snapshot uploaded yet — pasted-in images will show as blank until you upload one."
             }
           </div>
+
+          ${
+            lastSyncWarnings.length
+              ? `
+                <div class="sync-warning">
+                  ${
+                    lastSyncWarnings.map(
+                      w => `<p>⚠ ${escapeHtml(w)}</p>`
+                    ).join("")
+                  }
+                </div>
+              `
+              : ""
+          }
 
           <button
             class="wav-btn"
@@ -2691,6 +2947,7 @@ function renderSyncPage(){
 
       xlsxSnapshot = {};
       xlsxNameIndex = {};
+      lastSyncWarnings = [];
 
       renderSyncPage();
 
@@ -2727,8 +2984,11 @@ async function handleXlsxUpload(e){
 
   try{
 
-    xlsxSnapshot =
+    const result =
       await loadXlsxSnapshot(file);
+
+    xlsxSnapshot = result.snapshot;
+    lastSyncWarnings = result.warnings;
 
     rebuildXlsxNameIndex();
 
@@ -2747,296 +3007,13 @@ async function handleXlsxUpload(e){
 
     console.error(err);
 
+    lastSyncWarnings = [];
+
     if(statusEl){
       statusEl.textContent =
         "Couldn't read that file: " + err.message;
     }
   }
-}
-
-
-/* ============================================================
-   GAMES PAGE
-   ============================================================ */
-
-let wavState = null;
-
-
-function renderGamesPage(){
-
-  const el =
-    document.getElementById("tab-games");
-
-  if(!el){
-    return;
-  }
-
-  const storedBest =
-    parseInt(
-      localStorage.getItem("wavBest") || "0",
-      10
-    );
-
-  el.innerHTML =
-    `
-      <div class="games-page">
-
-        <div class="game-card" id="wav-card">
-
-          <h3>
-            Whack-a-Vayne
-          </h3>
-
-          <p>
-            She keeps peeking out of the shadows. Click her
-            before she slips back into stealth. 30 seconds,
-            as many hits as you can land.
-          </p>
-
-          <div class="wav-hud">
-            <div>Score <span id="wav-score">0</span></div>
-            <div>Time <span id="wav-time">30</span>s</div>
-            <div>Best <span id="wav-best">${storedBest}</span></div>
-          </div>
-
-          <div class="wav-grid" id="wav-grid"></div>
-
-          <button class="wav-btn" id="wav-start">
-            Start
-          </button>
-
-          <div class="wav-end" id="wav-end"></div>
-
-        </div>
-
-      </div>
-    `;
-
-
-  const grid =
-    document.getElementById("wav-grid");
-
-  grid.innerHTML =
-    Array.from(
-      {length:9},
-      (_,i) =>
-        `<div class="wav-hole" data-hole="${i}">
-          <img class="wav-vayne" alt="Vayne" draggable="false">
-        </div>`
-    ).join("");
-
-
-  const vayneIcon =
-    championSquareImage("Vayne");
-
-  if(vayneIcon){
-
-    grid
-      .querySelectorAll(".wav-vayne")
-      .forEach(img => {
-        img.src = vayneIcon;
-      });
-  }
-
-
-  grid
-    .querySelectorAll(".wav-hole")
-    .forEach(hole => {
-
-      hole.addEventListener(
-        "click",
-        () => whackHole(hole)
-      );
-
-    });
-
-
-  document
-    .getElementById("wav-start")
-    .addEventListener(
-      "click",
-      startWhackAVayne
-    );
-}
-
-
-function whackHole(hole){
-
-  if(!wavState || !wavState.running){
-    return;
-  }
-
-  if(!hole.classList.contains("active")){
-    return;
-  }
-
-  clearTimeout(hole._wavTimeout);
-
-  hole.classList.remove("active");
-  hole.classList.add("hit");
-
-  setTimeout(
-    () => hole.classList.remove("hit"),
-    150
-  );
-
-  wavState.score++;
-
-  document.getElementById("wav-score").textContent =
-    wavState.score;
-}
-
-
-function startWhackAVayne(){
-
-  const grid =
-    document.getElementById("wav-grid");
-
-  const holes =
-    Array.from(
-      grid.querySelectorAll(".wav-hole")
-    );
-
-  const startBtn =
-    document.getElementById("wav-start");
-
-  const endEl =
-    document.getElementById("wav-end");
-
-
-  if(wavState){
-    clearInterval(wavState.tickTimer);
-    clearTimeout(wavState.spawnTimer);
-  }
-
-
-  holes.forEach(h => {
-    h.classList.remove("active","hit");
-    clearTimeout(h._wavTimeout);
-  });
-
-
-  endEl.textContent = "";
-  startBtn.disabled = true;
-  startBtn.textContent = "Whacking…";
-
-
-  wavState = {
-    running:true,
-    score:0,
-    timeLeft:30,
-    spawnTimer:null,
-    tickTimer:null
-  };
-
-
-  document.getElementById("wav-score").textContent = "0";
-  document.getElementById("wav-time").textContent = "30";
-
-
-  const spawnLoop = () => {
-
-    if(!wavState || !wavState.running){
-      return;
-    }
-
-    const idle =
-      holes.filter(
-        h => !h.classList.contains("active")
-      );
-
-    if(idle.length){
-
-      const hole =
-        idle[
-          Math.floor(Math.random() * idle.length)
-        ];
-
-      hole.classList.add("active");
-
-      const upTime =
-        500 + Math.random() * 500;
-
-      hole._wavTimeout =
-        setTimeout(() => {
-          hole.classList.remove("active");
-        },upTime);
-    }
-
-    const nextSpawn =
-      450 + Math.random() * 500;
-
-    wavState.spawnTimer =
-      setTimeout(spawnLoop,nextSpawn);
-  };
-
-
-  spawnLoop();
-
-
-  wavState.tickTimer =
-    setInterval(() => {
-
-      wavState.timeLeft--;
-
-      document.getElementById("wav-time").textContent =
-        Math.max(0,wavState.timeLeft);
-
-      if(wavState.timeLeft <= 0){
-        endWhackAVayne();
-      }
-
-    },1000);
-}
-
-
-function endWhackAVayne(){
-
-  if(!wavState){
-    return;
-  }
-
-  wavState.running = false;
-
-  clearInterval(wavState.tickTimer);
-  clearTimeout(wavState.spawnTimer);
-
-
-  const grid =
-    document.getElementById("wav-grid");
-
-  grid
-    .querySelectorAll(".wav-hole")
-    .forEach(h => {
-      h.classList.remove("active");
-      clearTimeout(h._wavTimeout);
-    });
-
-
-  const best =
-    parseInt(
-      localStorage.getItem("wavBest") || "0",
-      10
-    );
-
-  if(wavState.score > best){
-    localStorage.setItem("wavBest",wavState.score);
-  }
-
-  document.getElementById("wav-best").textContent =
-    Math.max(best,wavState.score);
-
-  document.getElementById("wav-end").textContent =
-    `Time's up — you landed ${wavState.score} hit${
-      wavState.score === 1 ? "" : "s"
-    } on Vayne.`;
-
-
-  const startBtn =
-    document.getElementById("wav-start");
-
-  startBtn.disabled = false;
-  startBtn.textContent = "Play again";
 }
 
 

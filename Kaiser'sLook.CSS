@@ -755,6 +755,312 @@ footer{
    GAMES PAGE
    ============================================================ */
 
+.games-menu{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:18px;
+}
+
+.arcade-card{
+  background:var(--bg-stone);
+  border:1px solid var(--hairline);
+  border-radius:14px;
+  padding:22px 20px;
+  text-align:center;
+  cursor:pointer;
+  transition:border-color .15s ease, transform .15s ease;
+}
+
+.arcade-card:hover{
+  border-color:var(--spectral-dim);
+  transform:translateY(-2px);
+}
+
+.arcade-card h3{
+  font-family:'Cinzel',serif;
+  font-size:16px;
+  color:var(--rune-gold);
+  margin:0 0 6px;
+}
+
+.arcade-card p{
+  color:var(--ink-dim);
+  font-size:12px;
+  line-height:1.55;
+  margin:0 0 14px;
+  min-height:32px;
+}
+
+.game-stage{
+  max-width:520px;
+  margin:0 auto;
+}
+
+.back-btn{
+  background:transparent !important;
+  color:var(--ink-dim) !important;
+  padding:8px 14px !important;
+  font-size:11px !important;
+  margin-bottom:16px;
+}
+
+.back-btn:hover{
+  color:var(--spectral) !important;
+}
+
+/* -------- Combo Trainer -------- */
+
+.combo-icons{
+  display:flex;
+  justify-content:center;
+  gap:10px;
+  margin-bottom:18px;
+}
+
+.combo-icon{
+  background:var(--bg-stone-2);
+  border:1px solid var(--hairline);
+  border-radius:10px;
+  padding:8px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:4px;
+  cursor:pointer;
+}
+
+.combo-icon img{
+  width:38px;
+  height:38px;
+  border-radius:6px;
+}
+
+.combo-icon span{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  color:var(--ink-dim);
+}
+
+.combo-icon.flash-show{
+  border-color:var(--spectral);
+  box-shadow:0 0 10px rgba(79,227,176,0.6);
+}
+
+.combo-icon.flash-correct{
+  border-color:var(--spectral);
+  background:rgba(79,227,176,0.15);
+}
+
+.combo-icon.flash-wrong{
+  border-color:var(--rust);
+  background:rgba(181,75,61,0.2);
+}
+
+/* -------- CS Practice -------- */
+
+.cs-bar-wrap{
+  width:100%;
+  height:16px;
+  background:var(--bg-stone-2);
+  border:1px solid var(--hairline);
+  border-radius:100px;
+  overflow:hidden;
+  margin-bottom:8px;
+}
+
+.cs-bar{
+  height:100%;
+  width:100%;
+  background:linear-gradient(90deg,var(--spectral),var(--rune-gold));
+  transition:width .15s linear;
+}
+
+.cs-hp{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:12px;
+  color:var(--ink-dim);
+  margin-bottom:16px;
+}
+
+/* -------- Guess the Champion -------- */
+
+.guess-portrait-wrap{
+  width:160px;
+  height:290px;
+  margin:0 auto 16px;
+  border-radius:10px;
+  overflow:hidden;
+  border:1px solid var(--hairline);
+  background:var(--bg-stone-2);
+}
+
+.guess-portrait{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  transition:filter .1s linear;
+}
+
+#guess-input{
+  width:100%;
+  background:var(--bg-stone-2);
+  border:1px solid var(--hairline);
+  border-radius:8px;
+  color:var(--ink);
+  font-size:14px;
+  padding:10px 12px;
+  margin-bottom:14px;
+  text-align:center;
+}
+
+/* -------- Trivia / Rune Builder / Item Speed Round (shared) -------- */
+
+.trivia-question{
+  font-size:14px;
+  color:var(--ink);
+  line-height:1.6;
+  margin-bottom:16px;
+  min-height:40px;
+}
+
+.rune-choices{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:10px;
+  margin-bottom:16px;
+}
+
+.rune-choice{
+  background:var(--bg-stone-2);
+  border:1px solid var(--hairline);
+  border-radius:10px;
+  padding:8px 12px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  cursor:pointer;
+  color:var(--ink);
+  font-family:'IBM Plex Mono',monospace;
+  font-size:12px;
+}
+
+.rune-choice img{
+  width:28px;
+  height:28px;
+  border-radius:6px;
+}
+
+.rune-choice:hover{
+  border-color:var(--spectral-dim);
+}
+
+.rune-choice.rune-used{
+  border-color:var(--spectral);
+  background:rgba(79,227,176,0.15);
+}
+
+.rune-choice.trivia-wrong{
+  border-color:var(--rust);
+  background:rgba(181,75,61,0.2);
+}
+
+.trivia-opt{
+  min-width:60px;
+  justify-content:center;
+}
+
+.rune-slots{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:8px;
+  margin-bottom:18px;
+}
+
+.rune-slot{
+  width:38px;
+  height:38px;
+  border-radius:8px;
+  border:1px dashed var(--hairline);
+  background:var(--bg-stone-2);
+}
+
+.rune-slot img{
+  width:100%;
+  height:100%;
+  border-radius:8px;
+  object-fit:cover;
+}
+
+.rune-slot.filled{
+  border-style:solid;
+  border-color:var(--spectral-dim);
+}
+
+/* -------- Ghost Memory -------- */
+
+.memory-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  max-width:320px;
+  margin:0 auto 18px;
+}
+
+.memory-card{
+  aspect-ratio:1/1;
+  border-radius:8px;
+  border:1px solid var(--hairline);
+  background:var(--bg-stone-2);
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  padding:0;
+}
+
+.memory-back{
+  font-family:'Cinzel',serif;
+  font-size:18px;
+  color:var(--spectral-dim);
+}
+
+.memory-card.flipped .memory-back,
+.memory-card.matched .memory-back{
+  display:none;
+}
+
+.memory-face{
+  display:none;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+.memory-card.flipped .memory-face,
+.memory-card.matched .memory-face{
+  display:block;
+}
+
+.memory-card.matched{
+  border-color:var(--spectral);
+  opacity:0.7;
+}
+
+/* -------- Canvas games (Dodge + Runner + Soul Tracker) -------- */
+
+#dodge-canvas,
+#runner-canvas,
+#soul-canvas{
+  display:block;
+  margin:0 auto 16px;
+  background:var(--bg-void);
+  border:1px solid var(--hairline);
+  border-radius:10px;
+}
+
 .games-page{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
@@ -1133,4 +1439,66 @@ table.data-table a:hover{
   border-radius:6px;
   padding:8px 12px;
   margin-bottom:8px;
+}
+
+/* ============================================================
+   CONDITIONAL BUILD CARDS
+   (generic "If he builds X, do Y" notes — Rune Build and
+   Itemization text on any champion's matchup card, not
+   hardcoded to one champion)
+   ============================================================ */
+
+.conditional-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:8px;
+}
+
+.conditional-card{
+  background:var(--bg-stone-2);
+  border:1px solid var(--hairline);
+  border-left:3px solid var(--rune-gold);
+  border-radius:8px;
+  padding:10px 12px;
+}
+
+.conditional-label{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  letter-spacing:0.03em;
+  text-transform:uppercase;
+  color:var(--rune-gold);
+  margin-bottom:4px;
+}
+
+.conditional-text{
+  font-size:13px;
+  line-height:1.6;
+  color:var(--ink);
+}
+
+/* ============================================================
+   DATA SYNC WARNINGS
+   (surfaced instead of silently doing nothing when an .xlsx
+   upload doesn't contain what we expected)
+   ============================================================ */
+
+.sync-warning{
+  border:1px solid var(--rust);
+  background:rgba(181,75,61,0.08);
+  border-radius:8px;
+  padding:10px 12px;
+  margin-bottom:14px;
+}
+
+.sync-warning p{
+  font-size:12.5px;
+  color:var(--ink);
+  margin:0 0 6px;
+  line-height:1.55;
+}
+
+.sync-warning p:last-child{
+  margin-bottom:0;
 }
