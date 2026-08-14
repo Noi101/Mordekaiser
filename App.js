@@ -28,7 +28,7 @@ const TAB_GIDS = {
  * skip straight to the .xlsx-based fallbacks (a file committed
  * to the repo, or a manual upload).
  */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxXeNf5S53hln_M7jslvtaIQi49D4Sqx96vhE-lyLHeF4hlgTn84Z-1TZFw_zUHDG0z/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwuAhdgtbgEK0jfTQbvr3F_oxxv_gtev0Ly0p52D6WovhGMDBcUepX6ny4UEx3u1XoF/exec";
 
 
 /* ============================================================
@@ -2791,7 +2791,17 @@ function parseA1Cell(ref){
  * resolved. This caps how long any single attempt is allowed to
  * take before giving up and falling through to the next source.
  */
-const APPS_SCRIPT_TIMEOUT_MS = 8000;
+/*
+ * Apps Script Web Apps can be genuinely slow — cold starts and
+ * a full-sheet scan (see CellImageExport.gs) can take a long
+ * time. This used to need to be short because it blocked the
+ * whole page; now that resolveImageSnapshotInBackground() runs
+ * unawaited, a longer timeout just means icons might show up a
+ * little later, not a frozen page — so it's fine to be generous
+ * here rather than give up on a legitimately-slow-but-working
+ * deployment.
+ */
+const APPS_SCRIPT_TIMEOUT_MS = 20000;
 
 
 /*
