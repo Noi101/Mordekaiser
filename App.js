@@ -18,6 +18,19 @@ const TAB_GIDS = {
 };
 
 
+/*
+ * Paste the /exec URL from your CellImageExport.gs Web App
+ * deployment here (see that file for setup steps). When this is
+ * set, in-cell pasted images (item icons on Matchup, rune icons
+ * on Runes) are read live from the actual sheet on every load —
+ * no .xlsx export/upload needed at all, and nothing can ever go
+ * stale since it's fetched fresh each time. Leave it blank to
+ * skip straight to the .xlsx-based fallbacks (a file committed
+ * to the repo, or a manual upload).
+ */
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxXeNf5S53hln_M7jslvtaIQi49D4Sqx96vhE-lyLHeF4hlgTn84Z-1TZFw_zUHDG0z/exec";
+
+
 /* ============================================================
    DATA DRAGON CONFIG
 
@@ -31,86 +44,175 @@ const TAB_GIDS = {
    Riot has published, so nothing extra is needed there either.
    ============================================================ */
 
-let wavState = null;
-let mordekaiserSpells = null;
-let itemizationFlat = [];
-let gameActiveCleanup = null;
+const DDRAGON_BASE =
+  "https://ddragon.leagueoflegends.com";
+
+let ddragonVersion = null;
+let ddragonChampions = {};
+let ddragonItems = {};
+let ddragonRunes = {};
 
 
-const GAME_LIST = [
-  {id:"whack",  name:"Whack-a-Vayne",           blurb:"Click her before she slips back into stealth."},
-  {id:"dodge",  name:"Realm of Death Dodge",    blurb:"Steer clear of the spectral bolts as long as you can."},
-  {id:"combo",  name:"Combo Trainer",           blurb:"Watch the ability sequence, then repeat it back."},
-  {id:"cs",     name:"CS Practice",             blurb:"Time your last hit on a shrinking-HP minion."},
-  {id:"guess",  name:"Guess the Champion",      blurb:"Splash art sharpens — name them before it's clear."},
-  {id:"trivia", name:"Matchup Trivia",          blurb:"Quiz yourself on your own written matchup ratings."},
-  {id:"runes",  name:"Rune Path Builder",       blurb:"Click his rune page together from memory."},
-  {id:"items",  name:"Itemization Speed Round", blurb:"Match the description to the right item."},
-  {id:"memory", name:"Ghost Memory",            blurb:"Classic pairs, played with champion icons."},
-  {id:"runner", name:"Realm Runner",            blurb:"Endless runner through the Realm of Death."},
-  {id:"souls",  name:"Soul Tracker",            blurb:"Collect drifting souls before they fade — bigger ones are worth more."}
-];
+/* ============================================================
+   DOM
+   ============================================================ */
+
+const statusEl =
+  document.getElementById("status");
+
+const syncLabel =
+  document.getElementById("sync-label");
+
+const tabnav =
+  document.getElementById("tabnav");
+
+const navToggle =
+  document.getElementById("nav-toggle");
+
+const tabsInner =
+  document.getElementById("tabs-inner");
+
+const searchWrap =
+  document.getElementById("search-wrap");
+
+const searchEl =
+  document.getElementById("search");
+
+const overlay =
+  document.getElementById("overlay");
+
+const sheetContent =
+  document.getElementById("sheet-content");
+
+const matchupGrid =
+  document.getElementById("matchup-grid");
+
+const nightfallVeil =
+  document.getElementById("nightfall-veil");
 
 
-function renderGamesPage(){
+let champions = [];
+let activeTab = "matchup";
 
-  const el =
-    document.getElementById("tab-games");
+/*
+ * titleByKey: our tab keys (matchup, runes, etc.) mapped to the
+ * real sheet tab titles — set inside fetchAll(), reused by the
+ * xlsx importer to find the matching sheet inside an uploaded
+ * .xlsx export.
+ *
+ * liveRowsByKey: the last live rowsByKey fetched from the API —
+ * kept around so we can re-resolve "what name is at this row
+ * right now" whenever we need to check an xlsx image for
+ * staleness, without re-fetching.
+ *
+ * xlsxSnapshot / xlsxNameIndex: the parsed contents of a
+ * manually-uploaded .xlsx export. xlsxSnapshot holds raw
+ * {row,col,imageUrl,nameAtUpload} entries per tab; xlsxNameIndex
+ * is that same data indexed by lowercased name for fast lookup.
+ * Session-only — cleared on page reload, since re-uploading is
+ * how you refresh it anyway.
+ *
+ * lastSyncWarnings: non-fatal problems found on the last xlsx
+ * upload (e.g. a tab that had no embedded images, or a sheet
+ * name that didn't match) — this is what used to fail silently.
+ * A failed upload throws and shows an error; a "succeeded but
+ * found nothing useful" upload now shows these warnings instead
+ * of just quietly doing nothing.
+ */
+let titleByKey = {};
+let liveRowsByKey = {};
+let xlsxSnapshot = {};
+let xlsxNameIndex = {};
+let lastSyncWarnings = [];
+let xlsxSnapshotSource = null;
 
-  if(!el){
-    return;
-  }
 
-  el.innerHTML =
-    `
-      <div class="games-menu" id="games-menu"></div>
-      <div class="game-stage" id="game-stage" style="display:none;"></div>
-    `;
+/* ============================================================
+   HELPERS
+   ============================================================ */
 
-  showGamesMenu();
+function escapeHtml(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
 }
 
 
-function showGamesMenu(){
+function normalizeName(name){
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[’']/g,"")
+    .replace(/&/g,"and")
+    .replace(/[^a-z0-9]/g,"");
+}
 
-  if(gameActiveCleanup){
-    gameActiveCleanup();
-    gameActiveCleanup = null;
+
+/*
+ * Plain Levenshtein edit distance, used only as a last-resort
+ * fuzzy fallback when looking up champion art (see
+ * findChampionData below) so a small typo in the spreadsheet's
+ * "C:" name cell — "Ganglank" instead of "Gangplank" — doesn't
+ * just silently fail to find a portrait. Generic on purpose:
+ * this isn't a hardcoded fix for one champion, it protects
+ * against the same kind of typo for any champion, now or later.
+ */
+function levenshtein(a,b){
+
+  const m = a.length;
+  const n = b.length;
+
+  const dp =
+    Array.from({length:m + 1},() => new Array(n + 1).fill(0));
+
+  for(let i = 0; i <= m; i++){ dp[i][0] = i; }
+  for(let j = 0; j <= n; j++){ dp[0][j] = j; }
+
+  for(let i = 1; i <= m; i++){
+    for(let j = 1; j <= n; j++){
+
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(
+              dp[i - 1][j],
+              dp[i][j - 1],
+              dp[i - 1][j - 1]
+            );
+    }
   }
 
-  const menu =
-    document.getElementById("games-menu");
+  return dp[m][n];
+}
 
-  const stage =
-    document.getElementById("game-stage");
 
-  if(!menu || !stage){
-    return;
+/*
+ * cellText: gives you the *displayable text* of a cell.
+ * - Plain values pass through.
+ * - =HYPERLINK("url","label") resolves to its label.
+ * - =IMAGE("url") has no text label, so this returns "" —
+ *   use extractImageUrl() below to get the picture itself.
+ */
+function cellText(cell){
+  if(cell === null || cell === undefined){
+    return "";
   }
 
-  stage.style.display = "none";
-  stage.innerHTML = "";
-  menu.style.display = "grid";
+  const s = String(cell);
 
-  menu.innerHTML =
-    GAME_LIST.map(
-      g => `
-        <div class="arcade-card" data-game="${g.id}">
-          <h3>${escapeHtml(g.name)}</h3>
-          <p>${escapeHtml(g.blurb)}</p>
-          <button class="wav-btn">Play</button>
-        </div>
-      `
-    ).join("");
+  if(s.startsWith("=")){
+    const link = extractHyperlink(s);
 
-  menu
-    .querySelectorAll(".arcade-card")
-    .forEach(card => {
-      card.addEventListener(
-        "click",
-        () => launchGame(card.dataset.game)
-      );
-    });
+    if(link){
+      return link.label;
+    }
+
+    return "";
+  }
+
+  return s.trim();
 }
 
 
@@ -723,102 +825,230 @@ async function fetchAll(){
     return;
   }
 
-    document.getElementById("dodge-time").textContent =
-      ((Date.now()-startTime)/1000).toFixed(1);
+  try{
 
-    rafId = requestAnimationFrame(loop);
-  }
+    syncLabel.textContent =
+      "Loading Riot assets…";
 
-  function startDodge(){
+    await loadDataDragon();
 
-    bolts = [];
-    player = {x:170,y:170,r:9};
-    running = true;
-    startTime = Date.now();
+    syncLabel.textContent =
+      "Loading spreadsheet…";
 
-    document.getElementById("dodge-end").textContent = "";
-    document.getElementById("dodge-start").disabled = true;
-    document.getElementById("dodge-start").textContent = "Running…";
+    const metaRes =
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/` +
+        `${SPREADSHEET_ID}?key=${API_KEY}` +
+        `&fields=sheets.properties`
+      );
 
-    clearInterval(spawnTimer);
-    spawnTimer = setInterval(spawnBolt,550);
+    const metaJson =
+      await metaRes.json();
 
-    loop();
-  }
-
-  function endDodge(){
-
-    running = false;
-    cancelAnimationFrame(rafId);
-    clearInterval(spawnTimer);
-
-    const elapsed = (Date.now()-startTime) / 1000;
-    const best = parseFloat(localStorage.getItem("dodgeBest") || "0");
-
-    if(elapsed > best){
-      localStorage.setItem("dodgeBest",elapsed.toFixed(1));
+    if(metaJson.error){
+      throw new Error(
+        metaJson.error.message
+      );
     }
 
-    document.getElementById("dodge-best").textContent =
-      Math.max(best,elapsed).toFixed(1);
+    titleByKey = {};
 
-    document.getElementById("dodge-end").textContent =
-      `Caught by the shadow realm at ${elapsed.toFixed(1)}s.`;
+    for(const key in TAB_GIDS){
 
-    const btn = document.getElementById("dodge-start");
-    btn.disabled = false;
-    btn.textContent = "Try again";
-  }
+      const props =
+        metaJson.sheets.find(
+          s =>
+            s.properties.sheetId ===
+            TAB_GIDS[key]
+        );
 
-  document.getElementById("dodge-start").addEventListener("click",startDodge);
+      if(!props){
 
-  gameActiveCleanup = () => {
-    running = false;
-    cancelAnimationFrame(rafId);
-    clearInterval(spawnTimer);
-  };
-}
+        throw new Error(
+          `Could not find sheet for ${key} ` +
+          `(gid ${TAB_GIDS[key]})`
+        );
+      }
+
+      titleByKey[key] =
+        props.properties.title;
+    }
 
 
-/* ============================================================
-   COMBO TRAINER
-   ============================================================ */
+    const rangeParams =
+      Object.values(titleByKey)
+        .map(
+          t =>
+            `ranges=${encodeURIComponent(
+              "'" + t + "'!A1:AA3000"
+            )}`
+        )
+        .join("&");
 
-async function loadMordekaiserSpells(){
 
-  if(mordekaiserSpells){
-    return mordekaiserSpells;
-  }
+    const batchRes =
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/` +
+        `${SPREADSHEET_ID}/values:batchGet?` +
+        `${rangeParams}` +
+        `&valueRenderOption=FORMULA` +
+        `&key=${API_KEY}`
+      );
 
-  const res =
-    await fetch(
-      `${DDRAGON_BASE}/cdn/${ddragonVersion}/data/en_US/champion/Mordekaiser.json`,
-      {cache:"no-store"}
+
+    const batchJson =
+      await batchRes.json();
+
+    if(batchJson.error){
+      throw new Error(
+        batchJson.error.message
+      );
+    }
+
+
+    const rowsByKey = {};
+    const keys =
+      Object.keys(titleByKey);
+
+
+    batchJson.valueRanges.forEach(
+      (vr,i) => {
+        rowsByKey[keys[i]] =
+          vr.values || [];
+      }
     );
 
-  const json = await res.json();
-  const spells = json.data.Mordekaiser.spells;
 
-  mordekaiserSpells =
-    ["Q","W","E","R"].map((key,i) => ({
-      key:key,
-      name:spells[i].name,
-      icon:`${DDRAGON_BASE}/cdn/${ddragonVersion}/img/spell/${spells[i].image.full}`
-    }));
-
-  return mordekaiserSpells;
-}
+    liveRowsByKey = rowsByKey;
 
 
-async function setupComboGame(container){
+    /*
+     * Look for an image snapshot automatically before ever
+     * showing the "no snapshot uploaded" message — this is the
+     * "check the files first" step. Priority order:
+     *   1. Live in-cell images via Apps Script (APPS_SCRIPT_URL)
+     *      — always current, no staleness possible, but needs a
+     *      one-time deployment (see CellImageExport.gs).
+     *   2. A .xlsx snapshot committed to the repo — shared for
+     *      every visitor, but only as fresh as its last commit.
+     *   3. This browser's own saved copy from a past manual
+     *      upload.
+     * Only if all three come back empty does the Data Sync tab
+     * ask for a fresh upload.
+     */
+    const liveResult =
+      await tryFetchLiveCellImages();
 
-  container.innerHTML =
-    `<div class="game-card"><p class="loading-small">Loading ability data…</p></div>`;
+    if(liveResult){
 
-  let spells;
+      xlsxSnapshot = liveResult.snapshot;
+      lastSyncWarnings = liveResult.warnings;
+      xlsxSnapshotSource = "live";
 
-  try{
-    spells = await loadMordekaiserSpells();
+      rebuildXlsxNameIndex();
+
+      // Cache it too, so something still shows up instantly on
+      // a repeat visit even before this fetch resolves.
+      saveXlsxSnapshotToStorage();
+
+    }else{
+
+      const repoResult =
+        await tryFetchXlsxSnapshotFromRepo();
+
+      if(repoResult){
+
+        xlsxSnapshot = repoResult.snapshot;
+        lastSyncWarnings = repoResult.warnings;
+        xlsxSnapshotSource = "repo";
+
+        rebuildXlsxNameIndex();
+
+        saveXlsxSnapshotToStorage();
+
+      }else{
+
+        const restored =
+          await tryRestoreXlsxSnapshotFromStorage();
+
+        xlsxSnapshotSource =
+          restored ? "storage" : null;
+      }
+    }
+
+
+    champions =
+      parseChampions(
+        rowsByKey.matchup
+      );
+
+
+    renderMatchupGrid(
+      champions
+    );
+
+
+    const itemizationSections =
+      parseTextSections(
+        rowsByKey.itemization,
+        "item"
+      );
+
+    renderIconSections(
+      "tab-itemization",
+      itemizationSections
+    );
+
+    itemizationFlat =
+      itemizationSections
+        .flatMap(s => s.items)
+        .filter(it => it.icon && it.label && it.text);
+
+
+    renderIconSections(
+      "tab-runes",
+      parseTextSections(
+        rowsByKey.runes,
+        "rune",
+        "runes"
+      )
+    );
+
+
+    renderAltSetups(
+      rowsByKey.altsetups
+    );
+
+
+    renderContent(
+      rowsByKey.content
+    );
+
+
+    renderHome(
+      rowsByKey.home
+    );
+
+
+    renderGamesPage();
+
+    renderSyncPage();
+
+
+    syncLabel.textContent =
+      `Live sync · ${champions.length} matchups · ` +
+      `Data Dragon ${ddragonVersion}`;
+
+
+    statusEl.style.display =
+      "none";
+
+    tabnav.style.display =
+      "flex";
+
+    switchTab("matchup");
+
+
   }catch(err){
 
     console.error(err);
@@ -2361,544 +2591,1248 @@ function rebuildXlsxNameIndex(){
         return;
       }
 
-        answered = true;
+      if(!xlsxNameIndex[tabKey][key]){
+        xlsxNameIndex[tabKey][key] = [];
+      }
 
-        if(btn.dataset.label === correct.label){
-          score++;
-          btn.classList.add("rune-used");
-          document.getElementById("item-score").textContent = score;
-        }else{
-          btn.classList.add("trivia-wrong");
-        }
-
-        setTimeout(nextRound,700);
-      });
-
+      xlsxNameIndex[tabKey][key].push(entry);
     });
+
+    Object.values(
+      xlsxNameIndex[tabKey]
+    ).forEach(
+      list =>
+        list.sort(
+          (a,b) =>
+            a.row - b.row ||
+            a.col - b.col
+        )
+    );
   }
+}
 
-  function finishItemGame(){
 
-    const best = parseInt(localStorage.getItem("itemSpeedBest") || "0",10);
+/*
+ * XLSX SNAPSHOT PERSISTENCE
 
-    if(score > best){
-      localStorage.setItem("itemSpeedBest",score);
+ * Previously the uploaded snapshot only lived in memory for the
+ * current tab — reload the page and you were back to "no
+ * snapshot uploaded, please upload one" every single time, even
+ * if nothing had changed. Two ways it can now be found
+ * automatically, checked in this order, before the Data Sync
+ * tab ever asks for a manual upload:
+
+ * 1. A snapshot file checked into the repo itself, right next
+ *    to index.html — see XLSX_REPO_PATH below. This is the
+ *    "from the git side" option: commit an .xlsx export under
+ *    that exact filename and every visitor gets it automatically,
+ *    no per-browser upload needed at all.
+ * 2. A snapshot saved locally in this browser from a previous
+ *    manual upload (IndexedDB, not localStorage — localStorage
+ *    caps out around 5-10MB and these image-heavy snapshots blow
+ *    past that easily, which is what was throwing
+ *    QuotaExceededError before).
+
+ * Only if neither is found does it fall back to asking for a
+ * file to be uploaded by hand.
+ */
+
+const XLSX_REPO_PATH = "snapshot.xlsx";
+
+const IDB_NAME = "mordeXlsxDB";
+const IDB_STORE = "snapshots";
+const IDB_KEY = "xlsxSnapshotV1";
+
+
+function openXlsxDb(){
+
+  return new Promise((resolve,reject) => {
+
+    if(!window.indexedDB){
+      reject(new Error("IndexedDB isn't available in this browser."));
+      return;
     }
 
-    document.getElementById("item-best").textContent = Math.max(best,score);
-    document.getElementById("item-end").textContent = `Final score: ${score}/${ROUNDS}.`;
-    document.getElementById("item-choices").innerHTML = "";
+    const req =
+      indexedDB.open(IDB_NAME,1);
 
-    document.getElementById("item-start").disabled = false;
-    document.getElementById("item-start").textContent = "Play again";
-  }
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(IDB_STORE);
+    };
 
-  document.getElementById("item-start").addEventListener("click",() => {
-
-    round = 0;
-    score = 0;
-
-    document.getElementById("item-score").textContent = "0";
-    document.getElementById("item-end").textContent = "";
-    document.getElementById("item-start").disabled = true;
-    document.getElementById("item-start").textContent = "Quizzing…";
-
-    nextRound();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
   });
-
-  gameActiveCleanup = () => {};
 }
 
 
-/* ============================================================
-   GHOST MEMORY
-   ============================================================ */
+async function saveXlsxSnapshotToStorage(){
 
-function setupMemoryGame(container){
+  try{
 
-  const storedBest =
-    parseInt(localStorage.getItem("memoryBest") || "0",10);
+    const db = await openXlsxDb();
 
-  const allChamps = Object.values(ddragonChampions);
+    await new Promise((resolve,reject) => {
 
-  if(allChamps.length < 8){
-    container.innerHTML =
-      `<div class="game-card"><p>Champion data hasn't loaded yet — try again in a moment.</p></div>`;
-    return;
-  }
+      const tx =
+        db.transaction(IDB_STORE,"readwrite");
 
-  container.innerHTML =
-    `
-      <div class="game-card">
-        <h3>Ghost Memory</h3>
-        <p>Classic pairs — flip two cards, find the matching champion.</p>
-        <div class="wav-hud">
-          <div>Moves <span id="mem-moves">0</span></div>
-          <div>Best <span id="mem-best">${storedBest || "—"}</span></div>
-        </div>
-        <div class="memory-grid" id="memory-grid"></div>
-        <button class="wav-btn" id="mem-start">Shuffle &amp; Start</button>
-        <div class="wav-end" id="mem-end"></div>
-      </div>
-    `;
+      tx.objectStore(IDB_STORE).put(
+        {
+          savedAt:Date.now(),
+          titleByKey:{
+            matchup:titleByKey.matchup,
+            runes:titleByKey.runes
+          },
+          snapshot:xlsxSnapshot
+        },
+        IDB_KEY
+      );
 
-  let flipped = [];
-  let matched = 0;
-  let moves = 0;
-  let lock = false;
-
-  function flipCard(card){
-
-    if(lock || card.classList.contains("flipped") || card.classList.contains("matched")){
-      return;
-    }
-
-    card.classList.add("flipped");
-    flipped.push(card);
-
-    if(flipped.length === 2){
-
-      moves++;
-      document.getElementById("mem-moves").textContent = moves;
-      lock = true;
-
-      const [a,b] = flipped;
-
-      if(a.dataset.id === b.dataset.id){
-
-        a.classList.add("matched");
-        b.classList.add("matched");
-        flipped = [];
-        lock = false;
-        matched++;
-
-        if(matched === 8){
-          finishMemory();
-        }
-
-      }else{
-
-        setTimeout(() => {
-          a.classList.remove("flipped");
-          b.classList.remove("flipped");
-          flipped = [];
-          lock = false;
-        },700);
-      }
-    }
-  }
-
-  function finishMemory(){
-
-    const best = parseInt(localStorage.getItem("memoryBest") || "0",10);
-
-    if(!best || moves < best){
-      localStorage.setItem("memoryBest",moves);
-    }
-
-    document.getElementById("mem-best").textContent =
-      best ? Math.min(best,moves) : moves;
-
-    document.getElementById("mem-end").textContent = `Solved in ${moves} moves.`;
-  }
-
-  function buildBoard(){
-
-    const chosen =
-      [...allChamps].sort(() => Math.random()-0.5).slice(0,8);
-
-    const cards =
-      [...chosen,...chosen]
-        .map(c => ({id:c.id,name:c.name}))
-        .sort(() => Math.random()-0.5);
-
-    matched = 0;
-    moves = 0;
-    flipped = [];
-    lock = false;
-
-    document.getElementById("mem-moves").textContent = "0";
-    document.getElementById("mem-end").textContent = "";
-
-    const grid = document.getElementById("memory-grid");
-
-    grid.innerHTML =
-      cards.map(
-        (c,i) => `
-          <button class="memory-card" data-idx="${i}" data-id="${c.id}">
-            <span class="memory-back">?</span>
-            <img class="memory-face" src="${championSquareImage(c.name) || ""}" alt="${escapeHtml(c.name)}">
-          </button>
-        `
-      ).join("");
-
-    grid.querySelectorAll(".memory-card").forEach(card => {
-      card.addEventListener("click",() => flipCard(card));
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
     });
+
+    return true;
+
+  }catch(err){
+
+    // IndexedDB has a much bigger quota than localStorage did,
+    // but browsers can still refuse to grant storage (private
+    // browsing, storage already full from something else, etc).
+    // Not fatal either way: the snapshot still works for this
+    // session, it just won't be there automatically next time.
+    console.warn("Could not save xlsx snapshot for next time:",err);
+
+    return false;
   }
-
-  document.getElementById("mem-start").addEventListener("click",buildBoard);
-
-  gameActiveCleanup = () => {};
 }
 
 
-/* ============================================================
-   REALM RUNNER
-   ============================================================ */
+/*
+ * Returns true if a saved snapshot was found and restored from
+ * this browser's local IndexedDB, false if there was nothing to
+ * restore.
+ */
+async function tryRestoreXlsxSnapshotFromStorage(){
 
-function setupRunnerGame(container){
+  let parsed;
 
-  const storedBest =
-    parseInt(localStorage.getItem("runnerBest") || "0",10);
+  try{
 
-  container.innerHTML =
-    `
-      <div class="game-card">
-        <h3>Realm Runner</h3>
-        <p>Space, tap, or click to jump. Obstacles get faster the longer you last.</p>
-        <div class="wav-hud">
-          <div>Score <span id="runner-score">0</span></div>
-          <div>Best <span id="runner-best">${storedBest}</span></div>
-        </div>
-        <canvas id="runner-canvas" width="340" height="170"></canvas>
-        <button class="wav-btn" id="runner-start">Start</button>
-        <div class="wav-end" id="runner-end"></div>
-      </div>
-    `;
+    const db = await openXlsxDb();
 
-  const canvas = document.getElementById("runner-canvas");
-  const ctx = canvas.getContext("2d");
+    parsed = await new Promise((resolve,reject) => {
 
-  const groundY = 140;
+      const tx =
+        db.transaction(IDB_STORE,"readonly");
 
-  let player = {x:40,y:groundY,vy:0,r:11,onGround:true};
-  let obstacles = [];
-  let speed = 3;
-  let running = false;
-  let rafId = null;
-  let spawnTimer = null;
-  let score = 0;
+      const req =
+        tx.objectStore(IDB_STORE).get(IDB_KEY);
 
-  function jump(){
-    if(running && player.onGround){
-      player.vy = -8.5;
-      player.onGround = false;
-    }
-  }
-
-  function keyHandler(e){
-    if(e.code === "Space"){
-      e.preventDefault();
-      jump();
-    }
-  }
-
-  window.addEventListener("keydown",keyHandler);
-  canvas.addEventListener("mousedown",jump);
-  canvas.addEventListener("touchstart",e => { jump(); e.preventDefault(); },{passive:false});
-
-  function spawnObstacle(){
-    obstacles.push({x:canvas.width+10,w:12+Math.random()*10,h:18+Math.random()*18});
-  }
-
-  function loop(){
-
-    if(!running){
-      return;
-    }
-
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-
-    ctx.strokeStyle = "#2a2732";
-    ctx.beginPath();
-    ctx.moveTo(0,groundY+11);
-    ctx.lineTo(canvas.width,groundY+11);
-    ctx.stroke();
-
-    player.vy += 0.5;
-    player.y += player.vy;
-
-    if(player.y >= groundY){
-      player.y = groundY;
-      player.vy = 0;
-      player.onGround = true;
-    }
-
-    ctx.fillStyle = "#4fe3b0";
-    ctx.beginPath();
-    ctx.arc(player.x,player.y,player.r,0,Math.PI*2);
-    ctx.fill();
-
-    speed += 0.0015;
-
-    obstacles.forEach(o => { o.x -= speed; });
-    obstacles = obstacles.filter(o => o.x + o.w > -10);
-
-    let hit = false;
-
-    obstacles.forEach(o => {
-
-      ctx.fillStyle = "#b54b3d";
-      ctx.fillRect(o.x,groundY+11-o.h,o.w,o.h);
-
-      const closestX = Math.max(o.x,Math.min(player.x,o.x+o.w));
-      const closestY = Math.max(groundY+11-o.h,Math.min(player.y,groundY+11));
-      const dist = Math.hypot(player.x-closestX,player.y-closestY);
-
-      if(dist < player.r){
-        hit = true;
-      }
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
     });
 
-    if(hit){
-      endRunner();
-      return;
-    }
-
-    score += 1;
-    document.getElementById("runner-score").textContent = Math.floor(score/6);
-
-    rafId = requestAnimationFrame(loop);
+  }catch(err){
+    return false;
   }
 
-  function startRunner(){
-
-    obstacles = [];
-    player = {x:40,y:groundY,vy:0,r:11,onGround:true};
-    speed = 3;
-    score = 0;
-    running = true;
-
-    document.getElementById("runner-score").textContent = "0";
-    document.getElementById("runner-end").textContent = "";
-    document.getElementById("runner-start").disabled = true;
-    document.getElementById("runner-start").textContent = "Running…";
-
-    clearInterval(spawnTimer);
-    spawnTimer = setInterval(spawnObstacle,1400);
-
-    rafId = requestAnimationFrame(loop);
+  if(!parsed || !parsed.snapshot){
+    return false;
   }
 
-  function endRunner(){
+  /*
+   * If the live spreadsheet's tab names have changed since this
+   * was saved, the row/column anchors it recorded may no longer
+   * line up with anything meaningful — safer to treat it as not
+   * found and let the person re-upload than to show images
+   * against the wrong rows.
+   */
+  const savedTitles = parsed.titleByKey || {};
 
-    running = false;
-    cancelAnimationFrame(rafId);
-    clearInterval(spawnTimer);
-
-    const finalScore = Math.floor(score/6);
-    const best = parseInt(localStorage.getItem("runnerBest") || "0",10);
-
-    if(finalScore > best){
-      localStorage.setItem("runnerBest",finalScore);
-    }
-
-    document.getElementById("runner-best").textContent = Math.max(best,finalScore);
-    document.getElementById("runner-end").textContent = `Caught at ${finalScore}m.`;
-
-    document.getElementById("runner-start").disabled = false;
-    document.getElementById("runner-start").textContent = "Try again";
+  if(
+    savedTitles.matchup !== titleByKey.matchup ||
+    savedTitles.runes !== titleByKey.runes
+  ){
+    return false;
   }
 
-  document.getElementById("runner-start").addEventListener("click",startRunner);
+  xlsxSnapshot = parsed.snapshot;
+  rebuildXlsxNameIndex();
 
-  gameActiveCleanup = () => {
-    running = false;
-    cancelAnimationFrame(rafId);
-    clearInterval(spawnTimer);
-    window.removeEventListener("keydown",keyHandler);
+  return true;
+}
+
+
+async function clearXlsxSnapshotStorage(){
+
+  try{
+
+    const db = await openXlsxDb();
+
+    await new Promise(resolve => {
+
+      const tx =
+        db.transaction(IDB_STORE,"readwrite");
+
+      tx.objectStore(IDB_STORE).delete(IDB_KEY);
+
+      tx.oncomplete = resolve;
+      tx.onerror = resolve;
+    });
+
+  }catch(err){
+    // Nothing to do — worst case it just gets overwritten
+    // next successful save.
+  }
+}
+
+
+/*
+ * parseA1Cell: turns "P166" into a 0-indexed {row,col} pair
+ * matching how rowsByKey/liveRowsByKey are indexed elsewhere in
+ * this file. Handles multi-letter columns (AA, AB, ...) the
+ * same way Sheets does.
+ */
+function parseA1Cell(ref){
+
+  const m =
+    String(ref || "").match(/^([A-Z]+)(\d+)$/i);
+
+  if(!m){
+    return null;
+  }
+
+  const letters =
+    m[1].toUpperCase();
+
+  let col = 0;
+
+  for(let i = 0; i < letters.length; i++){
+    col = col * 26 + (letters.charCodeAt(i) - 64);
+  }
+
+  return {
+    row:parseInt(m[2],10) - 1,
+    col:col - 1
   };
 }
 
 
-/* ============================================================
-   SOUL TRACKER
+/*
+ * Live in-cell image sync — this is the "get photos that look
+ * like this" answer: the Sheets REST API can't read in-cell
+ * image content at all, only Apps Script's SpreadsheetApp can
+ * (see CellImageExport.gs). If APPS_SCRIPT_URL is configured,
+ * this fetches that Web App's JSON output and feeds it into the
+ * same {row,col,imageUrl,nameAtUpload} shape the .xlsx snapshot
+ * system already uses — so lookupXlsxImages, the stale-badge
+ * logic, everything downstream just works unchanged. The one
+ * difference: since this is read fresh from the live sheet on
+ * every page load rather than a one-time export, "nameAtUpload"
+ * is always current, so it can never actually go stale.
+ */
+async function tryFetchLiveCellImages(){
 
-   Mordekaiser drags enemy souls into his realm — so here, souls
-   of three tiers (small/common, mid, and rare/high-value) drift
-   and bounce around the canvas at different speeds and fade at
-   different rates. Click a soul to bank its value before it
-   fades out; bigger souls are worth more but disappear faster,
-   so it's a constant judgment call about which one to chase.
-   ============================================================ */
+  if(!APPS_SCRIPT_URL){
+    return null;
+  }
 
-function setupSoulTrackerGame(container){
+  let res;
 
-  const storedBest =
-    parseInt(localStorage.getItem("soulBest") || "0",10);
+  try{
+    res = await fetch(APPS_SCRIPT_URL,{cache:"no-store"});
+  }catch(err){
+    console.warn("Could not reach the Apps Script image endpoint:",err);
+    return null;
+  }
 
-  const ROUND_SECONDS = 30;
+  if(!res.ok){
+    return null;
+  }
 
-  container.innerHTML =
+  let json;
+
+  try{
+    json = await res.json();
+  }catch(err){
+    console.warn("Apps Script image endpoint didn't return valid JSON:",err);
+    return null;
+  }
+
+  const snapshot = {};
+  const warnings = [];
+
+  ["matchup","runes"].forEach(key => {
+
+    const title =
+      titleByKey[key];
+
+    const entries =
+      title ? json[title] : null;
+
+    if(!entries || !entries.length){
+
+      snapshot[key] = [];
+
+      if(title){
+        warnings.push(
+          `The live image endpoint didn't find any in-cell pictures ` +
+          `on the "${title}" tab.`
+        );
+      }
+
+      return;
+    }
+
+    snapshot[key] =
+      entries.map(entry => {
+
+        const parsed =
+          parseA1Cell(entry.cell) || {
+            row:(entry.row || 1) - 1,
+            col:(entry.col || 1) - 1
+          };
+
+        return {
+          row:parsed.row,
+          col:parsed.col,
+          imageUrl:entry.url,
+          nameAtUpload:
+            key === "matchup"
+              ? resolveMatchupRowName(parsed.row)
+              : resolveIconRowName(key,parsed.row,parsed.col)
+        };
+      });
+  });
+
+  return {snapshot,warnings};
+}
+
+
+/*
+ * Checks for an .xlsx file sitting in the site's own files,
+ * right next to index.html — see XLSX_REPO_PATH above. Returns
+ * the parsed {snapshot,warnings} on success, or null if there's
+ * no such file (a normal 404, not an error worth surfacing) or
+ * it couldn't be read as a valid workbook.
+ */
+async function tryFetchXlsxSnapshotFromRepo(){
+
+  let res;
+
+  try{
+    res = await fetch(XLSX_REPO_PATH,{cache:"no-store"});
+  }catch(err){
+    // Network/CORS failure (e.g. running from a local file://
+    // path) — treat the same as "not found".
+    return null;
+  }
+
+  if(!res.ok){
+    return null;
+  }
+
+  try{
+
+    const buffer =
+      await res.arrayBuffer();
+
+    return await loadXlsxSnapshot(buffer);
+
+  }catch(err){
+
+    console.warn(
+      `Found "${XLSX_REPO_PATH}" but couldn't read it as an .xlsx file:`,
+      err
+    );
+
+    return null;
+  }
+}
+
+
+function lookupXlsxImage(tabKey,name){
+
+  const matches =
+    lookupXlsxImages(tabKey,name);
+
+  return matches.length ? matches[0] : null;
+}
+
+
+function lookupXlsxImages(tabKey,name){
+
+  const key =
+    (name || "").trim().toLowerCase();
+
+  if(!key){
+    return [];
+  }
+
+  const bucket =
+    xlsxNameIndex[tabKey] &&
+    xlsxNameIndex[tabKey][key];
+
+  return bucket || [];
+}
+
+
+function isXlsxEntryStale(tabKey,entry){
+
+  const currentName =
+    tabKey === "matchup"
+      ? resolveMatchupRowName(entry.row)
+      : resolveIconRowName(tabKey,entry.row,entry.col);
+
+  if(!currentName){
+    return true;
+  }
+
+  return (
+    currentName.trim().toLowerCase() !==
+    (entry.nameAtUpload || "").trim().toLowerCase()
+  );
+}
+
+
+function computeStaleSummary(){
+
+  const list = [];
+
+  ["matchup","runes"].forEach(tabKey => {
+
+    (xlsxSnapshot[tabKey] || []).forEach(entry => {
+
+      if(isXlsxEntryStale(tabKey,entry)){
+
+        list.push({
+          tab:tabKey,
+          uploadedName:entry.nameAtUpload || "(unrecognized row)"
+        });
+      }
+
+    });
+
+  });
+
+  return list;
+}
+
+
+/*
+ * resolvePath: resolves a relative OOXML "Target" path (e.g.
+ * "../media/image3.png") against the folder the relationship
+ * file lives in.
+ */
+function resolvePath(baseFolder,relativeTarget){
+
+  if(relativeTarget.startsWith("/")){
+    return relativeTarget.replace(/^\//,"");
+  }
+
+  const parts =
+    baseFolder.split("/");
+
+  relativeTarget
+    .split("/")
+    .forEach(part => {
+
+      if(part === ".."){
+        parts.pop();
+      }else if(part !== "."){
+        parts.push(part);
+      }
+
+    });
+
+  return parts.join("/");
+}
+
+
+const OOXML_REL_NS =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+
+async function readSheetImageAnchors(zip,sheetPath,tabKey){
+
+  const folder =
+    sheetPath.substring(0,sheetPath.lastIndexOf("/"));
+
+  const fileName =
+    sheetPath.substring(sheetPath.lastIndexOf("/") + 1);
+
+  const sheetRelsFile =
+    zip.file(`${folder}/_rels/${fileName}.rels`);
+
+  if(!sheetRelsFile){
+    return [];
+  }
+
+  const sheetRelsDoc =
+    new DOMParser().parseFromString(
+      await sheetRelsFile.async("string"),
+      "application/xml"
+    );
+
+  let drawingTarget = null;
+
+  sheetRelsDoc
+    .querySelectorAll("Relationship")
+    .forEach(r => {
+
+      if((r.getAttribute("Type") || "").endsWith("/drawing")){
+        drawingTarget = r.getAttribute("Target");
+      }
+
+    });
+
+  if(!drawingTarget){
+    return [];
+  }
+
+  const drawingPath =
+    resolvePath(folder,drawingTarget);
+
+  const drawingFile =
+    zip.file(drawingPath);
+
+  if(!drawingFile){
+    return [];
+  }
+
+  const drawingDoc =
+    new DOMParser().parseFromString(
+      await drawingFile.async("string"),
+      "application/xml"
+    );
+
+  const drawingFolder =
+    drawingPath.substring(0,drawingPath.lastIndexOf("/"));
+
+  const drawingFileName =
+    drawingPath.substring(drawingPath.lastIndexOf("/") + 1);
+
+  const drawingRelsFile =
+    zip.file(`${drawingFolder}/_rels/${drawingFileName}.rels`);
+
+  const embedTargets = {};
+
+  if(drawingRelsFile){
+
+    const drawingRelsDoc =
+      new DOMParser().parseFromString(
+        await drawingRelsFile.async("string"),
+        "application/xml"
+      );
+
+    drawingRelsDoc
+      .querySelectorAll("Relationship")
+      .forEach(r => {
+        embedTargets[r.getAttribute("Id")] =
+          r.getAttribute("Target");
+      });
+  }
+
+  const anchors =
+    drawingDoc.getElementsByTagNameNS("*","twoCellAnchor").length
+      ? Array.from(drawingDoc.getElementsByTagNameNS("*","twoCellAnchor"))
+      : Array.from(drawingDoc.getElementsByTagNameNS("*","oneCellAnchor"));
+
+  const entries = [];
+
+  for(const anchor of anchors){
+
+    const fromEl =
+      anchor.getElementsByTagNameNS("*","from")[0];
+
+    if(!fromEl){
+      continue;
+    }
+
+    const colEl =
+      fromEl.getElementsByTagNameNS("*","col")[0];
+
+    const rowEl =
+      fromEl.getElementsByTagNameNS("*","row")[0];
+
+    const col =
+      parseInt(colEl ? colEl.textContent : "0",10);
+
+    const row =
+      parseInt(rowEl ? rowEl.textContent : "0",10);
+
+    const blip =
+      anchor.getElementsByTagNameNS("*","blip")[0];
+
+    if(!blip){
+      continue;
+    }
+
+    const rEmbed =
+      blip.getAttributeNS(OOXML_REL_NS,"embed") ||
+      blip.getAttribute("r:embed");
+
+    const target =
+      embedTargets[rEmbed];
+
+    if(!target){
+      continue;
+    }
+
+    const mediaPath =
+      resolvePath(drawingFolder,target);
+
+    const mediaFile =
+      zip.file(mediaPath);
+
+    if(!mediaFile){
+      continue;
+    }
+
+    /*
+     * Data URL instead of a blob URL: blob URLs only live as
+     * long as the tab does, so nothing could ever be saved for
+     * next time. A data URL is just a string, so it can be
+     * stored directly (see saveXlsxSnapshotToStorage below) and
+     * read back exactly as it was without re-uploading the file.
+     */
+    const base64 =
+      await mediaFile.async("base64");
+
+    const ext =
+      (mediaPath.split(".").pop() || "png").toLowerCase();
+
+    const mime =
+      ext === "jpg" ? "jpeg" : ext;
+
+    const imageUrl =
+      `data:image/${mime};base64,${base64}`;
+
+    const nameAtUpload =
+      tabKey === "matchup"
+        ? resolveMatchupRowName(row)
+        : resolveIconRowName(tabKey,row,col);
+
+    entries.push({
+      row:row,
+      col:col,
+      imageUrl:imageUrl,
+      nameAtUpload:nameAtUpload
+    });
+  }
+
+  return entries;
+}
+
+
+async function loadXlsxSnapshot(file){
+
+  if(typeof JSZip === "undefined"){
+    throw new Error(
+      "JSZip didn't load — check your connection and try again."
+    );
+  }
+
+  const zip =
+    await JSZip.loadAsync(file);
+
+  const workbookFile =
+    zip.file("xl/workbook.xml");
+
+  const workbookRelsFile =
+    zip.file("xl/_rels/workbook.xml.rels");
+
+  if(!workbookFile || !workbookRelsFile){
+    throw new Error(
+      "That doesn't look like a valid .xlsx file."
+    );
+  }
+
+  const wbDoc =
+    new DOMParser().parseFromString(
+      await workbookFile.async("string"),
+      "application/xml"
+    );
+
+  const relsDoc =
+    new DOMParser().parseFromString(
+      await workbookRelsFile.async("string"),
+      "application/xml"
+    );
+
+  const relTargets = {};
+
+  relsDoc
+    .querySelectorAll("Relationship")
+    .forEach(r => {
+      relTargets[r.getAttribute("Id")] =
+        r.getAttribute("Target");
+    });
+
+  const sheetPaths = {};
+
+  wbDoc
+    .querySelectorAll("sheet")
+    .forEach(s => {
+
+      const name =
+        s.getAttribute("name");
+
+      const rid =
+        s.getAttributeNS(OOXML_REL_NS,"id") ||
+        s.getAttribute("r:id");
+
+      const target =
+        relTargets[rid];
+
+      if(name && target){
+        sheetPaths[name] =
+          "xl/" + target.replace(/^\/?/,"");
+      }
+
+    });
+
+  const wanted = {
+    matchup:titleByKey.matchup,
+    runes:titleByKey.runes
+  };
+
+  const snapshot = {};
+  const warnings = [];
+
+  /*
+   * This is the part that used to be a silent no-op: if the
+   * uploaded file didn't have a sheet matching our live tab
+   * title (wrong export, renamed tab, etc.) we'd just set an
+   * empty array and move on — the upload looked "successful"
+   * with nothing to show for it and no way to know why. Now
+   * every gap gets a warning that renderSyncPage actually
+   * displays.
+   */
+  for(const key in wanted){
+
+    const title =
+      wanted[key];
+
+    const path =
+      title ? sheetPaths[title] : null;
+
+    if(!path){
+
+      snapshot[key] = [];
+
+      warnings.push(
+        `Couldn't find a sheet named "${title || key}" inside this ` +
+        `file — make sure you exported the same spreadsheet that's ` +
+        `live-synced, with tab names unchanged.`
+      );
+
+      continue;
+    }
+
+    const entries =
+      await readSheetImageAnchors(zip,path,key);
+
+    snapshot[key] = entries;
+
+    if(!entries.length){
+
+      warnings.push(
+        `The "${title}" tab was found, but this file has no ` +
+        `embedded images on it — nothing pasted directly into a cell ` +
+        `there to read.`
+      );
+    }
+  }
+
+  return {snapshot,warnings};
+}
+
+
+function renderSyncPage(){
+
+  const el =
+    document.getElementById("tab-sync");
+
+  if(!el){
+    return;
+  }
+
+  const hasSnapshot =
+    Object.keys(xlsxSnapshot).some(
+      k => (xlsxSnapshot[k] || []).length
+    );
+
+  const staleList =
+    computeStaleSummary();
+
+  el.innerHTML =
     `
-      <div class="game-card">
-        <h3>Soul Tracker</h3>
-        <p>Souls of different value drift around the Realm of Death. Click them before they fade — bigger, brighter souls are worth more but don't stick around long.</p>
-        <div class="wav-hud">
-          <div>Score <span id="soul-score">0</span></div>
-          <div>Time <span id="soul-time">${ROUND_SECONDS}</span>s</div>
-          <div>Best <span id="soul-best">${storedBest}</span></div>
+      <div class="sync-page">
+
+        <div class="sync-card">
+
+          <h3>
+            Image Snapshot Sync
+          </h3>
+
+          <p>
+            Live text always comes straight from the spreadsheet.
+            Some images — item icons pasted directly into the
+            Matchup tab, and rune icons pasted into the Runes tab —
+            can't be read through the Sheets REST API at all, only
+            through Apps Script. This is found automatically three
+            ways, checked in this order:
+            ${
+              APPS_SCRIPT_URL
+                ? "a live Apps Script endpoint (configured, reading straight off the sheet — nothing ever goes stale),"
+                : `a live Apps Script endpoint (<strong>not configured yet</strong> — see <code>CellImageExport.gs</code> to set one up, it's the best option and skips needing an .xlsx at all),`
+            }
+            a file named <code>${escapeHtml(XLSX_REPO_PATH)}</code>
+            committed next to <code>index.html</code> in the site's
+            own files, or a copy saved locally from a manual
+            upload in this browser. Only if none of those exist
+            does it ask you to upload one below.
+          </p>
+
+          <input
+            type="file"
+            id="xlsx-input"
+            accept=".xlsx"
+          >
+
+          <div class="sync-status" id="sync-status">
+            ${
+              hasSnapshot
+                ? (
+                    xlsxSnapshotSource === "live"
+                      ? "Reading live from the sheet via Apps Script — always current, nothing to upload."
+                      : xlsxSnapshotSource === "repo"
+                        ? `Loaded automatically from "${escapeHtml(XLSX_REPO_PATH)}" in the site files.`
+                        : xlsxSnapshotSource === "storage"
+                          ? "Restored automatically from your last upload in this browser."
+                          : "Snapshot loaded and saved for next time."
+                  )
+                : `No snapshot found — checked the live Apps Script endpoint${APPS_SCRIPT_URL ? "" : " (not configured)"}, "${escapeHtml(XLSX_REPO_PATH)}" in the site files, and this browser's saved copy, found none. Upload an .xlsx export below, or set up the live endpoint for something that never needs re-uploading.`
+            }
+          </div>
+
+          ${
+            lastSyncWarnings.length
+              ? `
+                <div class="sync-warning">
+                  ${
+                    lastSyncWarnings.map(
+                      w => `<p>⚠ ${escapeHtml(w)}</p>`
+                    ).join("")
+                  }
+                </div>
+              `
+              : ""
+          }
+
+          ${
+            xlsxSnapshotSource === "live"
+              ? `
+                <p class="sync-disclaimer">
+                  This is being read live off the sheet, not stored
+                  anywhere — there's nothing to clear. To stop
+                  using it, remove the URL from
+                  <code>APPS_SCRIPT_URL</code> in App.js.
+                </p>
+              `
+              : `
+                <button
+                  class="wav-btn"
+                  id="xlsx-clear"
+                  ${hasSnapshot ? "" : "disabled"}
+                >
+                  Clear snapshot
+                </button>
+              `
+          }
+
+          <p class="sync-disclaimer">
+            Uploaded images are a snapshot from the moment you
+            exported the file — they can drift out of sync with
+            the live sheet over time. Anything listed below has
+            changed on the live sheet since your last upload, so
+            treat that image as possibly outdated; it'll disappear
+            from this list on its own once the data lines up again.
+          </p>
+
+          <div id="sync-stale-list">
+            ${
+              staleList.length
+                ? `
+                  <ul>
+                    ${
+                      staleList.map(
+                        s => `
+                          <li>
+                            <strong>${escapeHtml(s.uploadedName)}</strong>
+                            (${escapeHtml(s.tab)} tab) —
+                            row content has changed since upload
+                          </li>
+                        `
+                      ).join("")
+                    }
+                  </ul>
+                `
+                : hasSnapshot
+                  ? `<p class="sync-ok">Everything lines up — no stale images right now.</p>`
+                  : ""
+            }
+          </div>
+
         </div>
-        <canvas id="soul-canvas" width="340" height="300"></canvas>
-        <button class="wav-btn" id="soul-start">Start</button>
-        <div class="wav-end" id="soul-end"></div>
+
       </div>
     `;
 
-  const canvas = document.getElementById("soul-canvas");
-  const ctx = canvas.getContext("2d");
+  updateSyncTabDot(staleList.length);
 
-  const SOUL_TIERS = [
-    {value:1, r:9,  color:"#4fe3b0", life:3400, weight:5},
-    {value:3, r:13, color:"#c9a15a", life:2500, weight:3},
-    {value:7, r:17, color:"#b54b3d", life:1700, weight:1}
-  ];
+  document
+    .getElementById("xlsx-input")
+    .addEventListener("change",handleXlsxUpload);
 
-  function pickTier(){
+  const clearBtn =
+    document.getElementById("xlsx-clear");
 
-    const total =
-      SOUL_TIERS.reduce((s,t) => s + t.weight,0);
+  if(clearBtn){
 
-    let roll = Math.random() * total;
+    clearBtn.addEventListener("click",async () => {
 
-    for(const t of SOUL_TIERS){
+      xlsxSnapshot = {};
+      xlsxNameIndex = {};
+      lastSyncWarnings = [];
+      xlsxSnapshotSource = null;
 
-      if(roll < t.weight){
-        return t;
-      }
+      await clearXlsxSnapshotStorage();
 
-      roll -= t.weight;
-    }
+      renderSyncPage();
 
-    return SOUL_TIERS[0];
-  }
+      renderIconSections(
+        "tab-runes",
+        parseTextSections(
+          liveRowsByKey.runes,
+          "rune",
+          "runes"
+        )
+      );
 
-  let souls = [];
-  let score = 0;
-  let timeLeft = ROUND_SECONDS;
-  let running = false;
-  let rafId = null;
-  let spawnTimer = null;
-  let tickTimer = null;
-
-  function spawnSoul(){
-
-    if(souls.length >= 9){
-      return;
-    }
-
-    const tier = pickTier();
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 0.4 + Math.random() * 0.9;
-
-    souls.push({
-      x: tier.r + Math.random() * (canvas.width - tier.r*2),
-      y: tier.r + Math.random() * (canvas.height - tier.r*2),
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      r: tier.r,
-      color: tier.color,
-      value: tier.value,
-      born: Date.now(),
-      life: tier.life + Math.random() * 700
     });
   }
+}
 
-  function loop(){
 
-    if(!running){
-      return;
-    }
+/*
+ * Puts a small red dot on the "Data Sync" tab button itself so
+ * a live-vs-snapshot mismatch is visible without having to open
+ * that tab to notice it.
+ */
+function updateSyncTabDot(staleCount){
 
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+  const btn =
+    document.querySelector('button[data-tab="sync"]');
 
-    const now = Date.now();
-
-    souls.forEach(s => {
-
-      s.x += s.vx;
-      s.y += s.vy;
-
-      if(s.x < s.r || s.x > canvas.width - s.r){ s.vx *= -1; }
-      if(s.y < s.r || s.y > canvas.height - s.r){ s.vy *= -1; }
-
-      const age = now - s.born;
-      const fade = Math.max(0,1 - age / s.life);
-
-      ctx.globalAlpha = 0.25 + fade * 0.75;
-      ctx.fillStyle = s.color;
-      ctx.beginPath();
-      ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-
-      ctx.fillStyle = "#0b0a0d";
-      ctx.font = "10px 'IBM Plex Mono', monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(s.value,s.x,s.y);
-    });
-
-    souls = souls.filter(s => now - s.born < s.life);
-
-    rafId = requestAnimationFrame(loop);
+  if(!btn){
+    return;
   }
 
-  function handleClick(e){
+  let dot =
+    btn.querySelector(".stale-dot");
 
-    if(!running){
-      return;
+  if(staleCount > 0){
+
+    if(!dot){
+      dot = document.createElement("span");
+      dot.className = "stale-dot";
+      btn.appendChild(dot);
+    }
+    
+    dot.title =
+      `${staleCount} image${staleCount === 1 ? "" : "s"} out of sync with the live sheet`;
+
+  }else if(dot){
+    dot.remove();
+  }
+}
+
+
+async function handleXlsxUpload(e){
+
+  const file =
+    e.target.files[0];
+
+  if(!file){
+    return;
+  }
+
+  const statusEl =
+    document.getElementById("sync-status");
+
+  if(statusEl){
+    statusEl.textContent =
+      "Reading file…";
+  }
+
+  try{
+
+    const result =
+      await loadXlsxSnapshot(file);
+
+    xlsxSnapshot = result.snapshot;
+    lastSyncWarnings = result.warnings;
+    xlsxSnapshotSource = "upload";
+
+    rebuildXlsxNameIndex();
+
+    const saved =
+      await saveXlsxSnapshotToStorage();
+
+    if(!saved){
+      lastSyncWarnings = [
+        ...lastSyncWarnings,
+        "This snapshot is a bit large to save for next time — " +
+        "it'll work for this session, but you'll need to " +
+        "re-upload after refreshing the page."
+      ];
     }
 
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    renderIconSections(
+      "tab-runes",
+      parseTextSections(
+        liveRowsByKey.runes,
+        "rune",
+        "runes"
+      )
+    );
 
-    for(let i = souls.length - 1; i >= 0; i--){
+    renderSyncPage();
 
-      const s = souls[i];
+  }catch(err){
 
-      if(Math.hypot(x - s.x,y - s.y) <= s.r){
+    console.error(err);
 
-        score += s.value;
-        souls.splice(i,1);
+    lastSyncWarnings = [];
 
-        document.getElementById("soul-score").textContent = score;
-        break;
+    if(statusEl){
+      statusEl.textContent =
+        "Couldn't read that file: " + err.message;
+    }
+  }
+}
+
+
+/* ============================================================
+   TABS
+   ============================================================ */
+
+function switchTab(tab){
+
+  activeTab =
+    tab;
+
+
+  document
+    .querySelectorAll(
+      "nav.tabs button[data-tab]"
+    )
+    .forEach(
+      b =>
+        b.classList.toggle(
+          "active",
+          b.dataset.tab === tab
+        )
+    );
+
+
+  matchupGrid.style.display =
+    tab === "matchup"
+      ? "grid"
+      : "none";
+
+
+  searchWrap.style.display =
+    tab === "matchup"
+      ? "block"
+      : "none";
+
+
+  document
+    .querySelectorAll(
+      ".tab-page"
+    )
+    .forEach(
+      p =>
+        p.style.display =
+          "none"
+    );
+
+
+  if(tab !== "matchup"){
+
+    const page =
+      document.getElementById(
+        "tab-" + tab
+      );
+
+    if(page){
+      page.style.display =
+        "block";
+    }
+  }
+}
+
+
+tabnav.addEventListener(
+  "click",
+  e => {
+
+    const btn =
+      e.target.closest(
+        "button[data-tab]"
+      );
+
+    if(btn){
+
+      switchTab(
+        btn.dataset.tab
+      );
+
+      if(navToggle){
+        navToggle.classList.remove("open");
+      }
+
+      if(tabsInner){
+        tabsInner.classList.remove("open");
       }
     }
+
   }
+);
 
-  canvas.addEventListener("click",handleClick);
-  canvas.addEventListener("touchstart",e => { handleClick(e); e.preventDefault(); },{passive:false});
 
-  function startSoulTracker(){
+/* ============================================================
+   MOBILE NAV TOGGLE
+   ============================================================ */
 
-    souls = [];
-    score = 0;
-    timeLeft = ROUND_SECONDS;
-    running = true;
+if(navToggle && tabsInner){
 
-    document.getElementById("soul-score").textContent = "0";
-    document.getElementById("soul-time").textContent = ROUND_SECONDS;
-    document.getElementById("soul-end").textContent = "";
-    document.getElementById("soul-start").disabled = true;
-    document.getElementById("soul-start").textContent = "Tracking…";
+  navToggle.addEventListener(
+    "click",
+    () => {
+      navToggle.classList.toggle("open");
+      tabsInner.classList.toggle("open");
+    }
+  );
+}
 
-    clearInterval(spawnTimer);
-    clearInterval(tickTimer);
 
-    spawnTimer = setInterval(spawnSoul,550);
+/* ============================================================
+   SEARCH
+   ============================================================ */
 
-    tickTimer = setInterval(() => {
+searchEl.addEventListener(
+  "input",
+  () => {
 
-      timeLeft--;
+    const q =
+      searchEl.value
+        .trim()
+        .toLowerCase();
 
-      document.getElementById("soul-time").textContent =
-        Math.max(0,timeLeft);
+
+    const filtered =
+      q
+        ? champions.filter(
+            c =>
+              c.name
+                .toLowerCase()
+                .includes(q)
+          )
+        : champions;
+
+
+    renderMatchupGrid(
+      filtered
+    );
+  }
+);
+
+
+searchEl.addEventListener(
+  "keydown",
+  e => {
+
+    if(e.key === "Enter"){
+
+      const q =
+        searchEl.value
+          .trim()
+          .toLowerCase();
+
+
+      const match =
+        champions.find(
+          c =>
+            c.name
+              .toLowerCase()
+              .includes(q)
+        );
+
+
+      if(match){
+        openDetail(match);
+      }
+    }
+
+  }
+);
+
+
+/* ============================================================
+   MORDEKAISER MACE CURSOR
+
+   Body classes swap the CSS cursor (drawn in the stylesheet):
+   default resting mace, a raised mace on hover over anything
+   clickable, a swinging mace on mousedown, and — after the
+   page has sat idle for a while — the dim "Realm of Death"
+   mace plus a slow shadow veil over the whole page (Nightfall).
+   Any movement, click, key press, touch, or scroll cancels
+   Nightfall and restarts the idle clock.
+   ============================================================ */
+
+const NIGHTFALL_DELAY_MS = 6000;
+
+const HOVER_SELECTOR =
+  "a, button, input, textarea, .card, .icon-card, " +
+  ".wav-hole, [data-tab], .close-btn";
+
+let nightfallTimer = null;
+
+
+function clearNightfall(){
+
+  document.body.classList.remove("nightfall-active");
+
+  if(nightfallVeil){
+    nightfallVeil.classList.remove("show");
+  }
+}
+
+
+function armNightfall(){
+
+  clearTimeout(nightfallTimer);
+
+  nightfallTimer =
+    setTimeout(() => {
+
+      document.body.classList.add("nightfall-active");
 
       if(nightfallVeil){
         nightfallVeil.classList.add("show");
