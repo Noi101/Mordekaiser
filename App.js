@@ -125,6 +125,7 @@ let xlsxSnapshot = {};
 let xlsxNameIndex = {};
 let lastSyncWarnings = [];
 let xlsxSnapshotSource = null;
+let xlsxSnapshotChecking = true;
 
 
 /* ============================================================
@@ -923,58 +924,19 @@ async function fetchAll(){
 
 
     /*
-     * Look for an image snapshot automatically before ever
-     * showing the "no snapshot uploaded" message — this is the
-     * "check the files first" step. Priority order:
-     *   1. Live in-cell images via Apps Script (APPS_SCRIPT_URL)
-     *      — always current, no staleness possible, but needs a
-     *      one-time deployment (see CellImageExport.gs).
-     *   2. A .xlsx snapshot committed to the repo — shared for
-     *      every visitor, but only as fresh as its last commit.
-     *   3. This browser's own saved copy from a past manual
-     *      upload.
-     * Only if all three come back empty does the Data Sync tab
-     * ask for a fresh upload.
+     * Image snapshot resolution (live Apps Script -> repo file
+     * -> browser storage) now runs in the BACKGROUND — not
+     * awaited here. It used to block the entire page behind it:
+     * if the Apps Script endpoint was slow to respond (cold
+     * starts, a big sheet to scan), the whole site sat frozen on
+     * "Loading spreadsheet data…" until it finally resolved or
+     * timed out. None of the matchup text, ratings, or guides
+     * depend on this — only a handful of pasted-in icons do — so
+     * there's no reason to make every visitor wait on it.
+     * resolveImageSnapshotInBackground() patches the icons in
+     * once it finishes, whenever that ends up being.
      */
-    const liveResult =
-      await tryFetchLiveCellImages();
-
-    if(liveResult){
-
-      xlsxSnapshot = liveResult.snapshot;
-      lastSyncWarnings = liveResult.warnings;
-      xlsxSnapshotSource = "live";
-
-      rebuildXlsxNameIndex();
-
-      // Cache it too, so something still shows up instantly on
-      // a repeat visit even before this fetch resolves.
-      saveXlsxSnapshotToStorage();
-
-    }else{
-
-      const repoResult =
-        await tryFetchXlsxSnapshotFromRepo();
-
-      if(repoResult){
-
-        xlsxSnapshot = repoResult.snapshot;
-        lastSyncWarnings = repoResult.warnings;
-        xlsxSnapshotSource = "repo";
-
-        rebuildXlsxNameIndex();
-
-        saveXlsxSnapshotToStorage();
-
-      }else{
-
-        const restored =
-          await tryRestoreXlsxSnapshotFromStorage();
-
-        xlsxSnapshotSource =
-          restored ? "storage" : null;
-      }
-    }
+    resolveImageSnapshotInBackground();
 
 
     champions =
@@ -2821,6 +2783,18 @@ function parseA1Cell(ref){
 
 
 /*
+ * Apps Script Web Apps can be genuinely slow — cold starts and
+ * a full-sheet scan (see CellImageExport.gs) can take a long
+ * time, sometimes tens of seconds. Without a timeout, fetchAll()
+ * would sit there waiting indefinitely and the whole site would
+ * be stuck on "Loading spreadsheet data…" until it finally
+ * resolved. This caps how long any single attempt is allowed to
+ * take before giving up and falling through to the next source.
+ */
+const APPS_SCRIPT_TIMEOUT_MS = 8000;
+
+
+/*
  * Live in-cell image sync — this is the "get photos that look
  * like this" answer: the Sheets REST API can't read in-cell
  * image content at all, only Apps Script's SpreadsheetApp can
@@ -2839,13 +2813,39 @@ async function tryFetchLiveCellImages(){
     return null;
   }
 
+  const controller =
+    new AbortController();
+
+  const timeoutId =
+    setTimeout(
+      () => controller.abort(),
+      APPS_SCRIPT_TIMEOUT_MS
+    );
+
   let res;
 
   try{
-    res = await fetch(APPS_SCRIPT_URL,{cache:"no-store"});
+
+    res = await fetch(
+      APPS_SCRIPT_URL,
+      {cache:"no-store",signal:controller.signal}
+    );
+
   }catch(err){
-    console.warn("Could not reach the Apps Script image endpoint:",err);
+
+    if(err.name === "AbortError"){
+      console.warn(
+        `Apps Script image endpoint didn't respond within ` +
+        `${APPS_SCRIPT_TIMEOUT_MS}ms — skipping it for this load.`
+      );
+    }else{
+      console.warn("Could not reach the Apps Script image endpoint:",err);
+    }
+
     return null;
+
+  }finally{
+    clearTimeout(timeoutId);
   }
 
   if(!res.ok){
@@ -2950,6 +2950,88 @@ async function tryFetchXlsxSnapshotFromRepo(){
 
     return null;
   }
+}
+
+
+/*
+ * Runs the three image-snapshot sources in priority order (live
+ * Apps Script -> repo file -> browser storage) and applies
+ * whichever one succeeds. Called from fetchAll() WITHOUT an
+ * await — see the comment at that call site for why. Once this
+ * settles (could be instantly, could be several seconds later),
+ * it re-renders the Runes tab and the Data Sync tab so whatever
+ * it found actually shows up, without the rest of the page ever
+ * having been blocked on it.
+ */
+async function resolveImageSnapshotInBackground(){
+
+  try{
+
+    const liveResult =
+      await tryFetchLiveCellImages();
+
+    if(liveResult){
+
+      xlsxSnapshot = liveResult.snapshot;
+      lastSyncWarnings = liveResult.warnings;
+      xlsxSnapshotSource = "live";
+
+      rebuildXlsxNameIndex();
+
+      // Cache it too, so something still shows up instantly on
+      // a repeat visit even before this fetch resolves.
+      saveXlsxSnapshotToStorage();
+
+    }else{
+
+      const repoResult =
+        await tryFetchXlsxSnapshotFromRepo();
+
+      if(repoResult){
+
+        xlsxSnapshot = repoResult.snapshot;
+        lastSyncWarnings = repoResult.warnings;
+        xlsxSnapshotSource = "repo";
+
+        rebuildXlsxNameIndex();
+
+        saveXlsxSnapshotToStorage();
+
+      }else{
+
+        const restored =
+          await tryRestoreXlsxSnapshotFromStorage();
+
+        xlsxSnapshotSource =
+          restored ? "storage" : null;
+      }
+    }
+
+  }catch(err){
+
+    // Whatever went wrong, the rest of the site already
+    // rendered fine without this — just log it and leave the
+    // Data Sync tab to report "nothing found" as usual.
+    console.warn("Image snapshot resolution failed:",err);
+
+  }finally{
+
+    xlsxSnapshotChecking = false;
+  }
+
+  if(liveRowsByKey.runes){
+
+    renderIconSections(
+      "tab-runes",
+      parseTextSections(
+        liveRowsByKey.runes,
+        "rune",
+        "runes"
+      )
+    );
+  }
+
+  renderSyncPage();
 }
 
 
@@ -3415,7 +3497,9 @@ function renderSyncPage(){
                           ? "Restored automatically from your last upload in this browser."
                           : "Snapshot loaded and saved for next time."
                   )
-                : `No snapshot found — checked the live Apps Script endpoint${APPS_SCRIPT_URL ? "" : " (not configured)"}, "${escapeHtml(XLSX_REPO_PATH)}" in the site files, and this browser's saved copy, found none. Upload an .xlsx export below, or set up the live endpoint for something that never needs re-uploading.`
+                : xlsxSnapshotChecking
+                  ? "Checking for a live Apps Script feed, a repo file, and a saved copy in this browser… the rest of the page doesn't wait on this, so feel free to look around."
+                  : `No snapshot found — checked the live Apps Script endpoint${APPS_SCRIPT_URL ? "" : " (not configured)"}, "${escapeHtml(XLSX_REPO_PATH)}" in the site files, and this browser's saved copy, found none. Upload an .xlsx export below, or set up the live endpoint for something that never needs re-uploading.`
             }
           </div>
 
@@ -3552,7 +3636,7 @@ function updateSyncTabDot(staleCount){
       dot.className = "stale-dot";
       btn.appendChild(dot);
     }
-    
+
     dot.title =
       `${staleCount} image${staleCount === 1 ? "" : "s"} out of sync with the live sheet`;
 
