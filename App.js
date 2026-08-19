@@ -126,6 +126,7 @@ let xlsxNameIndex = {};
 let lastSyncWarnings = [];
 let xlsxSnapshotSource = null;
 let xlsxSnapshotChecking = true;
+let currentOpenChampion = null;
 
 
 /* ============================================================
@@ -996,6 +997,8 @@ async function fetchAll(){
 
     renderSyncPage();
 
+    renderLabPage();
+
 
     syncLabel.textContent =
       `Live sync · ${champions.length} matchups · ` +
@@ -1417,6 +1420,8 @@ function forgeBar(label,value){
 
 function openDetail(c){
 
+  currentOpenChampion = c;
+
   const d =
     c.difficulty;
 
@@ -1679,6 +1684,9 @@ function openDetail(c){
 
 
 function closeDetail(){
+
+  currentOpenChampion = null;
+
   overlay.classList.remove(
     "open"
   );
@@ -2792,132 +2800,224 @@ function parseA1Cell(ref){
  * take before giving up and falling through to the next source.
  */
 /*
- * Apps Script Web Apps can be genuinely slow — cold starts and
- * a full-sheet scan (see CellImageExport.gs) can take a long
- * time. This used to need to be short because it blocked the
- * whole page; now that resolveImageSnapshotInBackground() runs
- * unawaited, a longer timeout just means icons might show up a
- * little later, not a frozen page — so it's fine to be generous
- * here rather than give up on a legitimately-slow-but-working
- * deployment.
+ * Apps Script Web Apps can be genuinely slow — cold starts and a
+ * full-sheet scan (see CellImageExport.gs) can take a long time.
+ * Rather than one big request that scans everything and only
+ * then replies, the site now streams this in pieces: a fast
+ * ?meta=1 call for sheet dimensions, then several small
+ * ?key=&startRow=&endRow= chunk requests fired in parallel, each
+ * applied to the page the moment it comes back — so images can
+ * start appearing in seconds instead of everyone waiting for the
+ * single slowest possible full scan.
  */
-const APPS_SCRIPT_TIMEOUT_MS = 20000;
+const APPS_SCRIPT_META_TIMEOUT_MS = 8000;
+const APPS_SCRIPT_CHUNK_TIMEOUT_MS = 15000;
+const APPS_SCRIPT_CHUNK_ROWS = 300;
+const APPS_SCRIPT_CHUNK_CONCURRENCY = 3;
+
+// How many chunk requests are queued/finished, for the "3/9
+// sections loaded" progress line on the Data Sync tab.
+let liveStreamTotal = 0;
+let liveStreamDone = 0;
+
+
+/*
+ * fetchJsonWithTimeout: fetch() + JSON parse, capped at
+ * timeoutMs, returning null on any failure (bad response,
+ * invalid JSON, or timeout) instead of throwing — every caller
+ * here treats "couldn't get this" as just something to skip or
+ * fall back from, never a hard error.
+ */
+async function fetchJsonWithTimeout(url,timeoutMs){
+
+  const controller =
+    new AbortController();
+
+  const timeoutId =
+    setTimeout(() => controller.abort(),timeoutMs);
+
+  try{
+
+    const res =
+      await fetch(url,{cache:"no-store",signal:controller.signal});
+
+    if(!res.ok){
+      return null;
+    }
+
+    return await res.json();
+
+  }catch(err){
+    return null;
+  }finally{
+    clearTimeout(timeoutId);
+  }
+}
 
 
 /*
  * Live in-cell image sync — this is the "get photos that look
  * like this" answer: the Sheets REST API can't read in-cell
  * image content at all, only Apps Script's SpreadsheetApp can
- * (see CellImageExport.gs). If APPS_SCRIPT_URL is configured,
- * this fetches that Web App's JSON output and feeds it into the
- * same {row,col,imageUrl,nameAtUpload} shape the .xlsx snapshot
- * system already uses — so lookupXlsxImages, the stale-badge
- * logic, everything downstream just works unchanged. The one
- * difference: since this is read fresh from the live sheet on
- * every page load rather than a one-time export, "nameAtUpload"
- * is always current, so it can never actually go stale.
+ * (see CellImageExport.gs).
+ *
+ * Unlike the repo-file and browser-storage sources, this one
+ * doesn't return a single {snapshot,warnings} result — it
+ * streams: it starts filling in xlsxSnapshot/xlsxNameIndex and
+ * re-rendering as chunks arrive, and keeps doing so in the
+ * background after this function itself has already returned.
+ * That's why it returns a plain boolean — true means "found the
+ * endpoint, streaming has begun" (so resolveImageSnapshotInBackground
+ * shouldn't also try the repo/storage fallbacks), false means
+ * "not configured or didn't respond even to the lightweight meta
+ * request" (so it should fall through to those instead).
  */
-async function tryFetchLiveCellImages(){
+async function streamLiveCellImages(){
 
   if(!APPS_SCRIPT_URL){
-    return null;
+    return false;
   }
 
-  const controller =
-    new AbortController();
-
-  const timeoutId =
-    setTimeout(
-      () => controller.abort(),
-      APPS_SCRIPT_TIMEOUT_MS
+  const meta =
+    await fetchJsonWithTimeout(
+      `${APPS_SCRIPT_URL}?meta=1`,
+      APPS_SCRIPT_META_TIMEOUT_MS
     );
 
-  let res;
-
-  try{
-
-    res = await fetch(
-      APPS_SCRIPT_URL,
-      {cache:"no-store",signal:controller.signal}
-    );
-
-  }catch(err){
-
-    if(err.name === "AbortError"){
-      console.warn(
-        `Apps Script image endpoint didn't respond within ` +
-        `${APPS_SCRIPT_TIMEOUT_MS}ms — skipping it for this load.`
-      );
-    }else{
-      console.warn("Could not reach the Apps Script image endpoint:",err);
-    }
-
-    return null;
-
-  }finally{
-    clearTimeout(timeoutId);
+  if(!meta || (!meta.matchup && !meta.runes)){
+    return false;
   }
 
-  if(!res.ok){
-    return null;
-  }
+  xlsxSnapshotSource = "live";
+  xlsxSnapshot = {matchup:[],runes:[]};
+  lastSyncWarnings = [];
 
-  let json;
+  rebuildXlsxNameIndex();
 
-  try{
-    json = await res.json();
-  }catch(err){
-    console.warn("Apps Script image endpoint didn't return valid JSON:",err);
-    return null;
-  }
-
-  const snapshot = {};
-  const warnings = [];
+  const chunkJobs = [];
 
   ["matchup","runes"].forEach(key => {
 
-    const title =
-      titleByKey[key];
+    const info = meta[key];
 
-    const entries =
-      title ? json[title] : null;
-
-    if(!entries || !entries.length){
-
-      snapshot[key] = [];
-
-      if(title){
-        warnings.push(
-          `The live image endpoint didn't find any in-cell pictures ` +
-          `on the "${title}" tab.`
-        );
-      }
-
+    if(!info || !info.lastRow){
       return;
     }
 
-    snapshot[key] =
-      entries.map(entry => {
+    for(
+      let start = 1;
+      start <= info.lastRow;
+      start += APPS_SCRIPT_CHUNK_ROWS
+    ){
 
-        const parsed =
-          parseA1Cell(entry.cell) || {
-            row:(entry.row || 1) - 1,
-            col:(entry.col || 1) - 1
-          };
-
-        return {
-          row:parsed.row,
-          col:parsed.col,
-          imageUrl:entry.url,
-          nameAtUpload:
-            key === "matchup"
-              ? resolveMatchupRowName(parsed.row)
-              : resolveIconRowName(key,parsed.row,parsed.col)
-        };
+      chunkJobs.push({
+        key:key,
+        start:start,
+        end:Math.min(info.lastRow,start + APPS_SCRIPT_CHUNK_ROWS - 1)
       });
+    }
   });
 
-  return {snapshot,warnings};
+  liveStreamTotal = chunkJobs.length;
+  liveStreamDone = 0;
+
+  if(!chunkJobs.length){
+    finalizeLiveStream();
+    return true;
+  }
+
+  renderSyncPage();
+
+  let nextIndex = 0;
+
+  async function worker(){
+
+    while(nextIndex < chunkJobs.length){
+
+      const job = chunkJobs[nextIndex];
+      nextIndex++;
+
+      const url =
+        `${APPS_SCRIPT_URL}?key=${encodeURIComponent(job.key)}` +
+        `&startRow=${job.start}&endRow=${job.end}`;
+
+      const chunkResult =
+        await fetchJsonWithTimeout(url,APPS_SCRIPT_CHUNK_TIMEOUT_MS);
+
+      liveStreamDone++;
+
+      if(chunkResult && Array.isArray(chunkResult.found)){
+
+        chunkResult.found.forEach(entry => {
+
+          const parsed =
+            parseA1Cell(entry.cell) || {
+              row:(entry.row || 1) - 1,
+              col:(entry.col || 1) - 1
+            };
+
+          xlsxSnapshot[job.key].push({
+            row:parsed.row,
+            col:parsed.col,
+            imageUrl:entry.url,
+            nameAtUpload:
+              job.key === "matchup"
+                ? resolveMatchupRowName(parsed.row)
+                : resolveIconRowName(job.key,parsed.row,parsed.col)
+          });
+        });
+
+        if(chunkResult.found.length){
+
+          rebuildXlsxNameIndex();
+
+          // Patch newly-arrived icons into whatever's currently
+          // on screen — the Runes tab grid, and a matchup detail
+          // overlay if the person happens to have one open right
+          // now — instead of waiting for every chunk to finish.
+          if(liveRowsByKey.runes){
+
+            renderIconSections(
+              "tab-runes",
+              parseTextSections(liveRowsByKey.runes,"rune","runes")
+            );
+          }
+
+          if(currentOpenChampion){
+            openDetail(currentOpenChampion);
+          }
+        }
+
+      }else{
+
+        lastSyncWarnings.push(
+          `A section of the "${job.key}" tab (rows ${job.start}-${job.end}) ` +
+          `didn't respond in time and was skipped.`
+        );
+      }
+
+      renderSyncPage();
+    }
+  }
+
+  const workerCount =
+    Math.min(APPS_SCRIPT_CHUNK_CONCURRENCY,chunkJobs.length);
+
+  Promise.all(
+    Array.from({length:workerCount},() => worker())
+  ).then(finalizeLiveStream);
+
+  return true;
+}
+
+
+function finalizeLiveStream(){
+
+  xlsxSnapshotChecking = false;
+
+  saveXlsxSnapshotToStorage();
+
+  renderSyncPage();
 }
 
 
@@ -2975,24 +3075,14 @@ async function tryFetchXlsxSnapshotFromRepo(){
  */
 async function resolveImageSnapshotInBackground(){
 
+  let streaming = false;
+
   try{
 
-    const liveResult =
-      await tryFetchLiveCellImages();
+    streaming =
+      await streamLiveCellImages();
 
-    if(liveResult){
-
-      xlsxSnapshot = liveResult.snapshot;
-      lastSyncWarnings = liveResult.warnings;
-      xlsxSnapshotSource = "live";
-
-      rebuildXlsxNameIndex();
-
-      // Cache it too, so something still shows up instantly on
-      // a repeat visit even before this fetch resolves.
-      saveXlsxSnapshotToStorage();
-
-    }else{
+    if(!streaming){
 
       const repoResult =
         await tryFetchXlsxSnapshotFromRepo();
@@ -3026,7 +3116,14 @@ async function resolveImageSnapshotInBackground(){
 
   }finally{
 
-    xlsxSnapshotChecking = false;
+    // If streaming started, it clears this itself in
+    // finalizeLiveStream() once every chunk has actually
+    // finished — clearing it here too would make the "checking…"
+    // message on the Data Sync tab disappear immediately, before
+    // any images have actually arrived.
+    if(!streaming){
+      xlsxSnapshotChecking = false;
+    }
   }
 
   if(liveRowsByKey.runes){
@@ -3497,19 +3594,23 @@ function renderSyncPage(){
 
           <div class="sync-status" id="sync-status">
             ${
-              hasSnapshot
+              xlsxSnapshotSource === "live"
                 ? (
-                    xlsxSnapshotSource === "live"
-                      ? "Reading live from the sheet via Apps Script — always current, nothing to upload."
-                      : xlsxSnapshotSource === "repo"
+                    liveStreamTotal > 0 && liveStreamDone < liveStreamTotal
+                      ? `Reading live from the sheet via Apps Script — ${liveStreamDone}/${liveStreamTotal} sections loaded so far, more on the way…`
+                      : "Reading live from the sheet via Apps Script — always current, nothing to upload."
+                  )
+                : hasSnapshot
+                  ? (
+                      xlsxSnapshotSource === "repo"
                         ? `Loaded automatically from "${escapeHtml(XLSX_REPO_PATH)}" in the site files.`
                         : xlsxSnapshotSource === "storage"
                           ? "Restored automatically from your last upload in this browser."
                           : "Snapshot loaded and saved for next time."
-                  )
-                : xlsxSnapshotChecking
-                  ? "Checking for a live Apps Script feed, a repo file, and a saved copy in this browser… the rest of the page doesn't wait on this, so feel free to look around."
-                  : `No snapshot found — checked the live Apps Script endpoint${APPS_SCRIPT_URL ? "" : " (not configured)"}, "${escapeHtml(XLSX_REPO_PATH)}" in the site files, and this browser's saved copy, found none. Upload an .xlsx export below, or set up the live endpoint for something that never needs re-uploading.`
+                    )
+                  : xlsxSnapshotChecking
+                    ? "Checking for a live Apps Script feed, a repo file, and a saved copy in this browser… the rest of the page doesn't wait on this, so feel free to look around."
+                    : `No snapshot found — checked the live Apps Script endpoint${APPS_SCRIPT_URL ? "" : " (not configured)"}, "${escapeHtml(XLSX_REPO_PATH)}" in the site files, and this browser's saved copy, found none. Upload an .xlsx export below, or set up the live endpoint for something that never needs re-uploading.`
             }
           </div>
 
