@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mordekaiser — Live Bibel</title>
-<link rel="stylesheet" href="Kaiser'sLook.CSS">
+<title>Mordekaiser — Live Bible</title>
+<link rel="stylesheet" href="KaiserLook.CSS">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -18,7 +18,7 @@
   <div class="eyebrow">Live-synced Champion Reference</div>
 
   <h1 class="title">
-    Mordekaiser <span>Bibel</span>
+    Mordekaiser <span>Bible</span>
   </h1>
 
   <p class="subtitle">
@@ -48,8 +48,6 @@
     <button data-tab="content">Content / Creators</button>
     <button data-tab="home">Patch Notes</button>
     <button data-tab="games">Games</button>
-    <button data-tab="sync">Data Sync</button>
-    <button data-tab="lab">Image Lab</button>
   </div>
 
 </nav>
@@ -74,8 +72,6 @@
   <div id="tab-content" class="tab-page" style="display:none;"></div>
   <div id="tab-home" class="tab-page" style="display:none;"></div>
   <div id="tab-games" class="tab-page" style="display:none;"></div>
-  <div id="tab-sync" class="tab-page" style="display:none;"></div>
-  <div id="tab-lab" class="tab-page" style="display:none;"></div>
 </main>
 
 <footer>
@@ -90,13 +86,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <!--
   Split into two files: app.js holds the spreadsheet sync/render
-  logic (still the "brains" of the page), games.js holds every
-  arcade game. app.js must load first — games.js calls back into
-  helpers it defines (championImage, findRuneData, ddragon*, etc).
+  logic (still the "brains" of the page, including the live
+  .xlsx image fetch), games.js holds every arcade game. app.js
+  must load first — games.js calls back into helpers it defines
+  (championImage, findRuneData, ddragon*, etc).
 -->
 <script src="App.js"></script>
 <script src="Games.js"></script>
-<script src="ImageLab.js"></script>
 
 </body>
 </html>

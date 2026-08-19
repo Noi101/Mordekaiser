@@ -18,19 +18,6 @@ const TAB_GIDS = {
 };
 
 
-/*
- * Paste the /exec URL from your CellImageExport.gs Web App
- * deployment here (see that file for setup steps). When this is
- * set, in-cell pasted images (item icons on Matchup, rune icons
- * on Runes) are read live from the actual sheet on every load —
- * no .xlsx export/upload needed at all, and nothing can ever go
- * stale since it's fetched fresh each time. Leave it blank to
- * skip straight to the .xlsx-based fallbacks (a file committed
- * to the repo, or a manual upload).
- */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwuAhdgtbgEK0jfTQbvr3F_oxxv_gtev0Ly0p52D6WovhGMDBcUepX6ny4UEx3u1XoF/exec";
-
-
 /* ============================================================
    DATA DRAGON CONFIG
 
@@ -96,36 +83,27 @@ let activeTab = "matchup";
 
 /*
  * titleByKey: our tab keys (matchup, runes, etc.) mapped to the
- * real sheet tab titles — set inside fetchAll(), reused by the
- * xlsx importer to find the matching sheet inside an uploaded
- * .xlsx export.
+ * real sheet tab titles — set inside fetchAll(), reused when
+ * reading the live .xlsx export to find the matching sheet.
  *
  * liveRowsByKey: the last live rowsByKey fetched from the API —
- * kept around so we can re-resolve "what name is at this row
- * right now" whenever we need to check an xlsx image for
- * staleness, without re-fetching.
+ * kept around so icon rows can be re-resolved to a name (e.g.
+ * for the Runes grid) without re-fetching.
  *
- * xlsxSnapshot / xlsxNameIndex: the parsed contents of a
- * manually-uploaded .xlsx export. xlsxSnapshot holds raw
- * {row,col,imageUrl,nameAtUpload} entries per tab; xlsxNameIndex
- * is that same data indexed by lowercased name for fast lookup.
- * Session-only — cleared on page reload, since re-uploading is
- * how you refresh it anyway.
- *
- * lastSyncWarnings: non-fatal problems found on the last xlsx
- * upload (e.g. a tab that had no embedded images, or a sheet
- * name that didn't match) — this is what used to fail silently.
- * A failed upload throws and shows an error; a "succeeded but
- * found nothing useful" upload now shows these warnings instead
- * of just quietly doing nothing.
+ * xlsxSnapshot / xlsxNameIndex: pictures pasted directly into a
+ * cell (not an =IMAGE() formula) can't be read through the
+ * Sheets REST API at all — only by reading the sheet's own
+ * .xlsx export, which bundles the actual image files. These
+ * hold that: xlsxSnapshot has raw {row,col,imageUrl,name}
+ * entries per tab, xlsxNameIndex is the same data indexed by
+ * lowercased name for fast lookup. Refetched live on every page
+ * load — see fetchLiveXlsxImages() — so there's nothing to
+ * upload and nothing that can go stale.
  */
 let titleByKey = {};
 let liveRowsByKey = {};
 let xlsxSnapshot = {};
 let xlsxNameIndex = {};
-let lastSyncWarnings = [];
-let xlsxSnapshotSource = null;
-let xlsxSnapshotChecking = true;
 let currentOpenChampion = null;
 
 
@@ -925,19 +903,16 @@ async function fetchAll(){
 
 
     /*
-     * Image snapshot resolution (live Apps Script -> repo file
-     * -> browser storage) now runs in the BACKGROUND — not
-     * awaited here. It used to block the entire page behind it:
-     * if the Apps Script endpoint was slow to respond (cold
-     * starts, a big sheet to scan), the whole site sat frozen on
-     * "Loading spreadsheet data…" until it finally resolved or
-     * timed out. None of the matchup text, ratings, or guides
-     * depend on this — only a handful of pasted-in icons do — so
-     * there's no reason to make every visitor wait on it.
-     * resolveImageSnapshotInBackground() patches the icons in
-     * once it finishes, whenever that ends up being.
+     * In-cell pasted images (item icons on Matchup, rune icons on
+     * Runes) can't be read through the Sheets REST API at all —
+     * only by reading the sheet's own live .xlsx export. That
+     * fetch runs in the BACKGROUND, not awaited here: none of the
+     * matchup text, ratings, or guides depend on it, only a
+     * handful of pasted-in icons do, so there's no reason to make
+     * every visitor wait on it. fetchLiveXlsxImages() patches the
+     * icons in once it resolves.
      */
-    resolveImageSnapshotInBackground();
+    fetchLiveXlsxImages();
 
 
     champions =
@@ -994,10 +969,6 @@ async function fetchAll(){
 
 
     renderGamesPage();
-
-    renderSyncPage();
-
-    renderLabPage();
 
 
     syncLabel.textContent =
@@ -1576,11 +1547,6 @@ function openDetail(c){
                                 alt=""
                                 loading="lazy"
                               >
-                              ${
-                                isXlsxEntryStale("matchup",entry)
-                                  ? `<span class="stale-badge" title="This row's content has changed since your last .xlsx upload">!</span>`
-                                  : ""
-                              }
                             </div>
                           `
                         ).join("")
@@ -1857,7 +1823,6 @@ function parseTextSections(rows,iconType,xlsxTabKey){
 
       let icon = directImage;
       let label = nameText;
-      let stale = false;
 
       if(!icon && nameText){
 
@@ -1892,8 +1857,8 @@ function parseTextSections(rows,iconType,xlsxTabKey){
 
         // Last-last resort: an image was pasted directly into
         // the cell (not an =IMAGE() formula, not a name Data
-        // Dragon recognizes) — only readable from an uploaded
-        // .xlsx snapshot, matched by name.
+        // Dragon recognizes) — only readable from the sheet's
+        // live .xlsx export, matched by name.
         const entry =
           lookupXlsxImage(
             xlsxTabKey,
@@ -1902,7 +1867,6 @@ function parseTextSections(rows,iconType,xlsxTabKey){
 
         if(entry){
           icon = entry.imageUrl;
-          stale = isXlsxEntryStale(xlsxTabKey,entry);
         }
       }
 
@@ -1911,8 +1875,7 @@ function parseTextSections(rows,iconType,xlsxTabKey){
         current.items.push({
           icon:icon,
           label:label,
-          text:explText,
-          stale:stale
+          text:explText
         });
       }
 
@@ -1985,11 +1948,6 @@ function renderIconSections(containerId,sections){
                                     alt=""
                                     loading="lazy"
                                   >
-                                  ${
-                                    it.stale
-                                      ? `<span class="stale-badge" title="This row's content has changed since your last .xlsx upload">!</span>`
-                                      : ""
-                                  }
                                 </div>
                               `
                               : `
@@ -2408,13 +2366,12 @@ function renderHome(rows){
   (rows || []).forEach(
     row => {
 
-      const texts =
+      const nonEmptyCells =
         (row || [])
-          .map(cellText)
-          .filter(t => t);
+          .filter(c => cellText(c));
 
 
-      if(!texts.length){
+      if(!nonEmptyCells.length){
         return;
       }
 
@@ -2423,11 +2380,8 @@ function renderHome(rows){
         `
           <div class="paragraph-block">
             ${
-              texts
-                .map(
-                  t =>
-                    escapeHtml(t)
-                )
+              nonEmptyCells
+                .map(cellLinkHtml)
                 .join(" — ")
             }
           </div>
@@ -2448,40 +2402,34 @@ function renderHome(rows){
 
 
 /* ============================================================
-   XLSX SNAPSHOT ENGINE
+   XLSX IMAGE ENGINE
 
    Some images (pasted directly into cells with Sheets' "insert
    image in cell" feature, not an =IMAGE() formula) can't be read
    through the Sheets API at all — the API just returns nothing
    for that cell. The only way to get the actual picture is to
-   export the sheet as .xlsx (which bundles real image files)
-   and read it locally.
+   read the sheet's own .xlsx export, which bundles real image
+   files inside a zip.
 
-   The flow: you export → .xlsx from Google Sheets, upload it on
-   the Data Sync tab, and we dig through the file's internal XML
+   The flow: fetchLiveXlsxImages() (further below) fetches that
+   .xlsx export directly with a plain fetch() — Google's export
+   endpoint allows this cross-origin, no upload or server needed
+   — then the functions below dig through the file's internal XML
    to find every embedded image, which row/column it's anchored
    to, and — by cross-referencing that row against the live data
-   we already fetched — what champion/rune/item it belongs to.
+   already fetched — what champion/rune/item it belongs to.
 
-   Because that mapping is captured once at upload time, if the
-   live sheet later changes what's sitting in that row, we can
-   tell the image is now stale (isXlsxEntryStale) just by
-   re-checking what name is at that row *now* vs. what it was
-   *at upload time*. No stored image data is compared — only the
-   row's identity — which is intentionally simple.
+   This runs fresh on every page load, straight off the live
+   sheet, so there's nothing to upload, nothing to persist across
+   reloads, and nothing that can go stale.
 
-   NOTE: this is session-only. Nothing is persisted across page
-   reloads (images are held as in-memory blob URLs), which is
-   also why the tab always starts back at "no snapshot uploaded".
-
-   WHERE THE UPLOADED FILE IS USED: it only backs the Matchup
-   tab's itemization chips and the Runes tab icon grid — anywhere
-   a cell has an image pasted in directly rather than typed as a
+   WHERE THIS IS USED: it only backs the Matchup tab's
+   itemization chips and the Runes tab icon grid — anywhere a
+   cell has an image pasted in directly rather than typed as a
    name or an =IMAGE() formula (see the "last-last resort" branch
    in parseTextSections and the xlsxItems lookup in openDetail).
    All the *text* on every tab always comes straight from the
-   live Sheets API call in fetchAll(), never from the upload —
-   the upload is strictly an image patch, not a data source.
+   live Sheets API call in fetchAll(), independent of this.
    ============================================================ */
 
 function resolveMatchupRowName(rowIndex){
@@ -2553,7 +2501,7 @@ function rebuildXlsxNameIndex(){
     xlsxSnapshot[tabKey].forEach(entry => {
 
       const key =
-        (entry.nameAtUpload || "")
+        (entry.name || "")
           .trim()
           .toLowerCase();
 
@@ -2583,547 +2531,51 @@ function rebuildXlsxNameIndex(){
 
 
 /*
- * XLSX SNAPSHOT PERSISTENCE
-
- * Previously the uploaded snapshot only lived in memory for the
- * current tab — reload the page and you were back to "no
- * snapshot uploaded, please upload one" every single time, even
- * if nothing had changed. Two ways it can now be found
- * automatically, checked in this order, before the Data Sync
- * tab ever asks for a manual upload:
-
- * 1. A snapshot file checked into the repo itself, right next
- *    to index.html — see XLSX_REPO_PATH below. This is the
- *    "from the git side" option: commit an .xlsx export under
- *    that exact filename and every visitor gets it automatically,
- *    no per-browser upload needed at all.
- * 2. A snapshot saved locally in this browser from a previous
- *    manual upload (IndexedDB, not localStorage — localStorage
- *    caps out around 5-10MB and these image-heavy snapshots blow
- *    past that easily, which is what was throwing
- *    QuotaExceededError before).
-
- * Only if neither is found does it fall back to asking for a
- * file to be uploaded by hand.
+ * fetchLiveXlsxImages: fetches the spreadsheet's own .xlsx
+ * export directly — `.../export?format=xlsx` — with a plain
+ * fetch(), no server or upload involved. Google's export
+ * endpoint allows this cross-origin, so the response can be
+ * read straight into JSZip and parsed for embedded images, same
+ * as loadXlsxSnapshot() does for a manually-picked file.
+ *
+ * Called from fetchAll() WITHOUT an await — see the comment at
+ * that call site for why. Once it resolves (should only take a
+ * couple of seconds), it re-renders the Runes tab and, if a
+ * matchup detail overlay happens to be open, that too, so the
+ * icons just appear rather than needing a manual refresh.
  */
-
-const XLSX_REPO_PATH = "snapshot.xlsx";
-
-const IDB_NAME = "mordeXlsxDB";
-const IDB_STORE = "snapshots";
-const IDB_KEY = "xlsxSnapshotV1";
-
-
-function openXlsxDb(){
-
-  return new Promise((resolve,reject) => {
-
-    if(!window.indexedDB){
-      reject(new Error("IndexedDB isn't available in this browser."));
-      return;
-    }
-
-    const req =
-      indexedDB.open(IDB_NAME,1);
-
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore(IDB_STORE);
-    };
-
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-
-async function saveXlsxSnapshotToStorage(){
-
-  try{
-
-    const db = await openXlsxDb();
-
-    await new Promise((resolve,reject) => {
-
-      const tx =
-        db.transaction(IDB_STORE,"readwrite");
-
-      tx.objectStore(IDB_STORE).put(
-        {
-          savedAt:Date.now(),
-          titleByKey:{
-            matchup:titleByKey.matchup,
-            runes:titleByKey.runes
-          },
-          snapshot:xlsxSnapshot
-        },
-        IDB_KEY
-      );
-
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-
-    return true;
-
-  }catch(err){
-
-    // IndexedDB has a much bigger quota than localStorage did,
-    // but browsers can still refuse to grant storage (private
-    // browsing, storage already full from something else, etc).
-    // Not fatal either way: the snapshot still works for this
-    // session, it just won't be there automatically next time.
-    console.warn("Could not save xlsx snapshot for next time:",err);
-
-    return false;
-  }
-}
-
-
-/*
- * Returns true if a saved snapshot was found and restored from
- * this browser's local IndexedDB, false if there was nothing to
- * restore.
- */
-async function tryRestoreXlsxSnapshotFromStorage(){
-
-  let parsed;
-
-  try{
-
-    const db = await openXlsxDb();
-
-    parsed = await new Promise((resolve,reject) => {
-
-      const tx =
-        db.transaction(IDB_STORE,"readonly");
-
-      const req =
-        tx.objectStore(IDB_STORE).get(IDB_KEY);
-
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-
-  }catch(err){
-    return false;
-  }
-
-  if(!parsed || !parsed.snapshot){
-    return false;
-  }
-
-  /*
-   * If the live spreadsheet's tab names have changed since this
-   * was saved, the row/column anchors it recorded may no longer
-   * line up with anything meaningful — safer to treat it as not
-   * found and let the person re-upload than to show images
-   * against the wrong rows.
-   */
-  const savedTitles = parsed.titleByKey || {};
-
-  if(
-    savedTitles.matchup !== titleByKey.matchup ||
-    savedTitles.runes !== titleByKey.runes
-  ){
-    return false;
-  }
-
-  xlsxSnapshot = parsed.snapshot;
-  rebuildXlsxNameIndex();
-
-  return true;
-}
-
-
-async function clearXlsxSnapshotStorage(){
-
-  try{
-
-    const db = await openXlsxDb();
-
-    await new Promise(resolve => {
-
-      const tx =
-        db.transaction(IDB_STORE,"readwrite");
-
-      tx.objectStore(IDB_STORE).delete(IDB_KEY);
-
-      tx.oncomplete = resolve;
-      tx.onerror = resolve;
-    });
-
-  }catch(err){
-    // Nothing to do — worst case it just gets overwritten
-    // next successful save.
-  }
-}
-
-
-/*
- * parseA1Cell: turns "P166" into a 0-indexed {row,col} pair
- * matching how rowsByKey/liveRowsByKey are indexed elsewhere in
- * this file. Handles multi-letter columns (AA, AB, ...) the
- * same way Sheets does.
- */
-function parseA1Cell(ref){
-
-  const m =
-    String(ref || "").match(/^([A-Z]+)(\d+)$/i);
-
-  if(!m){
-    return null;
-  }
-
-  const letters =
-    m[1].toUpperCase();
-
-  let col = 0;
-
-  for(let i = 0; i < letters.length; i++){
-    col = col * 26 + (letters.charCodeAt(i) - 64);
-  }
-
-  return {
-    row:parseInt(m[2],10) - 1,
-    col:col - 1
-  };
-}
-
-
-/*
- * Apps Script Web Apps can be genuinely slow — cold starts and
- * a full-sheet scan (see CellImageExport.gs) can take a long
- * time, sometimes tens of seconds. Without a timeout, fetchAll()
- * would sit there waiting indefinitely and the whole site would
- * be stuck on "Loading spreadsheet data…" until it finally
- * resolved. This caps how long any single attempt is allowed to
- * take before giving up and falling through to the next source.
- */
-/*
- * Apps Script Web Apps can be genuinely slow — cold starts and a
- * full-sheet scan (see CellImageExport.gs) can take a long time.
- * Rather than one big request that scans everything and only
- * then replies, the site now streams this in pieces: a fast
- * ?meta=1 call for sheet dimensions, then several small
- * ?key=&startRow=&endRow= chunk requests fired in parallel, each
- * applied to the page the moment it comes back — so images can
- * start appearing in seconds instead of everyone waiting for the
- * single slowest possible full scan.
- */
-const APPS_SCRIPT_META_TIMEOUT_MS = 8000;
-const APPS_SCRIPT_CHUNK_TIMEOUT_MS = 15000;
-const APPS_SCRIPT_CHUNK_ROWS = 300;
-const APPS_SCRIPT_CHUNK_CONCURRENCY = 3;
-
-// How many chunk requests are queued/finished, for the "3/9
-// sections loaded" progress line on the Data Sync tab.
-let liveStreamTotal = 0;
-let liveStreamDone = 0;
-
-
-/*
- * fetchJsonWithTimeout: fetch() + JSON parse, capped at
- * timeoutMs, returning null on any failure (bad response,
- * invalid JSON, or timeout) instead of throwing — every caller
- * here treats "couldn't get this" as just something to skip or
- * fall back from, never a hard error.
- */
-async function fetchJsonWithTimeout(url,timeoutMs){
-
-  const controller =
-    new AbortController();
-
-  const timeoutId =
-    setTimeout(() => controller.abort(),timeoutMs);
+async function fetchLiveXlsxImages(){
 
   try{
 
     const res =
-      await fetch(url,{cache:"no-store",signal:controller.signal});
+      await fetch(
+        `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=xlsx`,
+        {cache:"no-store"}
+      );
 
     if(!res.ok){
-      return null;
-    }
-
-    return await res.json();
-
-  }catch(err){
-    return null;
-  }finally{
-    clearTimeout(timeoutId);
-  }
-}
-
-
-/*
- * Live in-cell image sync — this is the "get photos that look
- * like this" answer: the Sheets REST API can't read in-cell
- * image content at all, only Apps Script's SpreadsheetApp can
- * (see CellImageExport.gs).
- *
- * Unlike the repo-file and browser-storage sources, this one
- * doesn't return a single {snapshot,warnings} result — it
- * streams: it starts filling in xlsxSnapshot/xlsxNameIndex and
- * re-rendering as chunks arrive, and keeps doing so in the
- * background after this function itself has already returned.
- * That's why it returns a plain boolean — true means "found the
- * endpoint, streaming has begun" (so resolveImageSnapshotInBackground
- * shouldn't also try the repo/storage fallbacks), false means
- * "not configured or didn't respond even to the lightweight meta
- * request" (so it should fall through to those instead).
- */
-async function streamLiveCellImages(){
-
-  if(!APPS_SCRIPT_URL){
-    return false;
-  }
-
-  const meta =
-    await fetchJsonWithTimeout(
-      `${APPS_SCRIPT_URL}?meta=1`,
-      APPS_SCRIPT_META_TIMEOUT_MS
-    );
-
-  if(!meta || (!meta.matchup && !meta.runes)){
-    return false;
-  }
-
-  xlsxSnapshotSource = "live";
-  xlsxSnapshot = {matchup:[],runes:[]};
-  lastSyncWarnings = [];
-
-  rebuildXlsxNameIndex();
-
-  const chunkJobs = [];
-
-  ["matchup","runes"].forEach(key => {
-
-    const info = meta[key];
-
-    if(!info || !info.lastRow){
+      console.warn(`Couldn't fetch the live .xlsx export (HTTP ${res.status}) — pasted-in icons won't show up this load.`);
       return;
     }
-
-    for(
-      let start = 1;
-      start <= info.lastRow;
-      start += APPS_SCRIPT_CHUNK_ROWS
-    ){
-
-      chunkJobs.push({
-        key:key,
-        start:start,
-        end:Math.min(info.lastRow,start + APPS_SCRIPT_CHUNK_ROWS - 1)
-      });
-    }
-  });
-
-  liveStreamTotal = chunkJobs.length;
-  liveStreamDone = 0;
-
-  if(!chunkJobs.length){
-    finalizeLiveStream();
-    return true;
-  }
-
-  renderSyncPage();
-
-  let nextIndex = 0;
-
-  async function worker(){
-
-    while(nextIndex < chunkJobs.length){
-
-      const job = chunkJobs[nextIndex];
-      nextIndex++;
-
-      const url =
-        `${APPS_SCRIPT_URL}?key=${encodeURIComponent(job.key)}` +
-        `&startRow=${job.start}&endRow=${job.end}`;
-
-      const chunkResult =
-        await fetchJsonWithTimeout(url,APPS_SCRIPT_CHUNK_TIMEOUT_MS);
-
-      liveStreamDone++;
-
-      if(chunkResult && Array.isArray(chunkResult.found)){
-
-        chunkResult.found.forEach(entry => {
-
-          const parsed =
-            parseA1Cell(entry.cell) || {
-              row:(entry.row || 1) - 1,
-              col:(entry.col || 1) - 1
-            };
-
-          xlsxSnapshot[job.key].push({
-            row:parsed.row,
-            col:parsed.col,
-            imageUrl:entry.url,
-            nameAtUpload:
-              job.key === "matchup"
-                ? resolveMatchupRowName(parsed.row)
-                : resolveIconRowName(job.key,parsed.row,parsed.col)
-          });
-        });
-
-        if(chunkResult.found.length){
-
-          rebuildXlsxNameIndex();
-
-          // Patch newly-arrived icons into whatever's currently
-          // on screen — the Runes tab grid, and a matchup detail
-          // overlay if the person happens to have one open right
-          // now — instead of waiting for every chunk to finish.
-          if(liveRowsByKey.runes){
-
-            renderIconSections(
-              "tab-runes",
-              parseTextSections(liveRowsByKey.runes,"rune","runes")
-            );
-          }
-
-          if(currentOpenChampion){
-            openDetail(currentOpenChampion);
-          }
-        }
-
-      }else{
-
-        lastSyncWarnings.push(
-          `A section of the "${job.key}" tab (rows ${job.start}-${job.end}) ` +
-          `didn't respond in time and was skipped.`
-        );
-      }
-
-      renderSyncPage();
-    }
-  }
-
-  const workerCount =
-    Math.min(APPS_SCRIPT_CHUNK_CONCURRENCY,chunkJobs.length);
-
-  Promise.all(
-    Array.from({length:workerCount},() => worker())
-  ).then(finalizeLiveStream);
-
-  return true;
-}
-
-
-function finalizeLiveStream(){
-
-  xlsxSnapshotChecking = false;
-
-  saveXlsxSnapshotToStorage();
-
-  renderSyncPage();
-}
-
-
-/*
- * Checks for an .xlsx file sitting in the site's own files,
- * right next to index.html — see XLSX_REPO_PATH above. Returns
- * the parsed {snapshot,warnings} on success, or null if there's
- * no such file (a normal 404, not an error worth surfacing) or
- * it couldn't be read as a valid workbook.
- */
-async function tryFetchXlsxSnapshotFromRepo(){
-
-  let res;
-
-  try{
-    res = await fetch(XLSX_REPO_PATH,{cache:"no-store"});
-  }catch(err){
-    // Network/CORS failure (e.g. running from a local file://
-    // path) — treat the same as "not found".
-    return null;
-  }
-
-  if(!res.ok){
-    return null;
-  }
-
-  try{
 
     const buffer =
       await res.arrayBuffer();
 
-    return await loadXlsxSnapshot(buffer);
+    const result =
+      await loadXlsxSnapshot(buffer);
 
-  }catch(err){
+    xlsxSnapshot = result.snapshot;
 
-    console.warn(
-      `Found "${XLSX_REPO_PATH}" but couldn't read it as an .xlsx file:`,
-      err
-    );
-
-    return null;
-  }
-}
-
-
-/*
- * Runs the three image-snapshot sources in priority order (live
- * Apps Script -> repo file -> browser storage) and applies
- * whichever one succeeds. Called from fetchAll() WITHOUT an
- * await — see the comment at that call site for why. Once this
- * settles (could be instantly, could be several seconds later),
- * it re-renders the Runes tab and the Data Sync tab so whatever
- * it found actually shows up, without the rest of the page ever
- * having been blocked on it.
- */
-async function resolveImageSnapshotInBackground(){
-
-  let streaming = false;
-
-  try{
-
-    streaming =
-      await streamLiveCellImages();
-
-    if(!streaming){
-
-      const repoResult =
-        await tryFetchXlsxSnapshotFromRepo();
-
-      if(repoResult){
-
-        xlsxSnapshot = repoResult.snapshot;
-        lastSyncWarnings = repoResult.warnings;
-        xlsxSnapshotSource = "repo";
-
-        rebuildXlsxNameIndex();
-
-        saveXlsxSnapshotToStorage();
-
-      }else{
-
-        const restored =
-          await tryRestoreXlsxSnapshotFromStorage();
-
-        xlsxSnapshotSource =
-          restored ? "storage" : null;
-      }
-    }
+    rebuildXlsxNameIndex();
 
   }catch(err){
 
     // Whatever went wrong, the rest of the site already
-    // rendered fine without this — just log it and leave the
-    // Data Sync tab to report "nothing found" as usual.
-    console.warn("Image snapshot resolution failed:",err);
+    // rendered fine without this — only a handful of pasted-in
+    // icons depend on it, so just log it and move on.
+    console.warn("Couldn't read live cell images from the sheet:",err);
 
-  }finally{
-
-    // If streaming started, it clears this itself in
-    // finalizeLiveStream() once every chunk has actually
-    // finished — clearing it here too would make the "checking…"
-    // message on the Data Sync tab disappear immediately, before
-    // any images have actually arrived.
-    if(!streaming){
-      xlsxSnapshotChecking = false;
-    }
   }
 
   if(liveRowsByKey.runes){
@@ -3138,7 +2590,9 @@ async function resolveImageSnapshotInBackground(){
     );
   }
 
-  renderSyncPage();
+  if(currentOpenChampion){
+    openDetail(currentOpenChampion);
+  }
 }
 
 
@@ -3165,48 +2619,6 @@ function lookupXlsxImages(tabKey,name){
     xlsxNameIndex[tabKey][key];
 
   return bucket || [];
-}
-
-
-function isXlsxEntryStale(tabKey,entry){
-
-  const currentName =
-    tabKey === "matchup"
-      ? resolveMatchupRowName(entry.row)
-      : resolveIconRowName(tabKey,entry.row,entry.col);
-
-  if(!currentName){
-    return true;
-  }
-
-  return (
-    currentName.trim().toLowerCase() !==
-    (entry.nameAtUpload || "").trim().toLowerCase()
-  );
-}
-
-
-function computeStaleSummary(){
-
-  const list = [];
-
-  ["matchup","runes"].forEach(tabKey => {
-
-    (xlsxSnapshot[tabKey] || []).forEach(entry => {
-
-      if(isXlsxEntryStale(tabKey,entry)){
-
-        list.push({
-          tab:tabKey,
-          uploadedName:entry.nameAtUpload || "(unrecognized row)"
-        });
-      }
-
-    });
-
-  });
-
-  return list;
 }
 
 
@@ -3399,7 +2811,7 @@ async function readSheetImageAnchors(zip,sheetPath,tabKey){
     const imageUrl =
       `data:image/${mime};base64,${base64}`;
 
-    const nameAtUpload =
+    const name =
       tabKey === "matchup"
         ? resolveMatchupRowName(row)
         : resolveIconRowName(tabKey,row,col);
@@ -3408,7 +2820,7 @@ async function readSheetImageAnchors(zip,sheetPath,tabKey){
       row:row,
       col:col,
       imageUrl:imageUrl,
-      nameAtUpload:nameAtUpload
+      name:name
     });
   }
 
@@ -3416,7 +2828,7 @@ async function readSheetImageAnchors(zip,sheetPath,tabKey){
 }
 
 
-async function loadXlsxSnapshot(file){
+async function loadXlsxSnapshot(data){
 
   if(typeof JSZip === "undefined"){
     throw new Error(
@@ -3425,7 +2837,7 @@ async function loadXlsxSnapshot(file){
   }
 
   const zip =
-    await JSZip.loadAsync(file);
+    await JSZip.loadAsync(data);
 
   const workbookFile =
     zip.file("xl/workbook.xml");
@@ -3489,17 +2901,7 @@ async function loadXlsxSnapshot(file){
   };
 
   const snapshot = {};
-  const warnings = [];
 
-  /*
-   * This is the part that used to be a silent no-op: if the
-   * uploaded file didn't have a sheet matching our live tab
-   * title (wrong export, renamed tab, etc.) we'd just set an
-   * empty array and move on — the upload looked "successful"
-   * with nothing to show for it and no way to know why. Now
-   * every gap gets a warning that renderSyncPage actually
-   * displays.
-   */
   for(const key in wanted){
 
     const title =
@@ -3512,10 +2914,9 @@ async function loadXlsxSnapshot(file){
 
       snapshot[key] = [];
 
-      warnings.push(
-        `Couldn't find a sheet named "${title || key}" inside this ` +
-        `file — make sure you exported the same spreadsheet that's ` +
-        `live-synced, with tab names unchanged.`
+      console.warn(
+        `Couldn't find a sheet named "${title || key}" inside the ` +
+        `live .xlsx export — tab names may have changed.`
       );
 
       continue;
@@ -3525,301 +2926,11 @@ async function loadXlsxSnapshot(file){
       await readSheetImageAnchors(zip,path,key);
 
     snapshot[key] = entries;
-
-    if(!entries.length){
-
-      warnings.push(
-        `The "${title}" tab was found, but this file has no ` +
-        `embedded images on it — nothing pasted directly into a cell ` +
-        `there to read.`
-      );
-    }
   }
 
-  return {snapshot,warnings};
+  return {snapshot};
 }
 
-
-function renderSyncPage(){
-
-  const el =
-    document.getElementById("tab-sync");
-
-  if(!el){
-    return;
-  }
-
-  const hasSnapshot =
-    Object.keys(xlsxSnapshot).some(
-      k => (xlsxSnapshot[k] || []).length
-    );
-
-  const staleList =
-    computeStaleSummary();
-
-  el.innerHTML =
-    `
-      <div class="sync-page">
-
-        <div class="sync-card">
-
-          <h3>
-            Image Snapshot Sync
-          </h3>
-
-          <p>
-            Live text always comes straight from the spreadsheet.
-            Some images — item icons pasted directly into the
-            Matchup tab, and rune icons pasted into the Runes tab —
-            can't be read through the Sheets REST API at all, only
-            through Apps Script. This is found automatically three
-            ways, checked in this order:
-            ${
-              APPS_SCRIPT_URL
-                ? "a live Apps Script endpoint (configured, reading straight off the sheet — nothing ever goes stale),"
-                : `a live Apps Script endpoint (<strong>not configured yet</strong> — see <code>CellImageExport.gs</code> to set one up, it's the best option and skips needing an .xlsx at all),`
-            }
-            a file named <code>${escapeHtml(XLSX_REPO_PATH)}</code>
-            committed next to <code>index.html</code> in the site's
-            own files, or a copy saved locally from a manual
-            upload in this browser. Only if none of those exist
-            does it ask you to upload one below.
-          </p>
-
-          <input
-            type="file"
-            id="xlsx-input"
-            accept=".xlsx"
-          >
-
-          <div class="sync-status" id="sync-status">
-            ${
-              xlsxSnapshotSource === "live"
-                ? (
-                    liveStreamTotal > 0 && liveStreamDone < liveStreamTotal
-                      ? `Reading live from the sheet via Apps Script — ${liveStreamDone}/${liveStreamTotal} sections loaded so far, more on the way…`
-                      : "Reading live from the sheet via Apps Script — always current, nothing to upload."
-                  )
-                : hasSnapshot
-                  ? (
-                      xlsxSnapshotSource === "repo"
-                        ? `Loaded automatically from "${escapeHtml(XLSX_REPO_PATH)}" in the site files.`
-                        : xlsxSnapshotSource === "storage"
-                          ? "Restored automatically from your last upload in this browser."
-                          : "Snapshot loaded and saved for next time."
-                    )
-                  : xlsxSnapshotChecking
-                    ? "Checking for a live Apps Script feed, a repo file, and a saved copy in this browser… the rest of the page doesn't wait on this, so feel free to look around."
-                    : `No snapshot found — checked the live Apps Script endpoint${APPS_SCRIPT_URL ? "" : " (not configured)"}, "${escapeHtml(XLSX_REPO_PATH)}" in the site files, and this browser's saved copy, found none. Upload an .xlsx export below, or set up the live endpoint for something that never needs re-uploading.`
-            }
-          </div>
-
-          ${
-            lastSyncWarnings.length
-              ? `
-                <div class="sync-warning">
-                  ${
-                    lastSyncWarnings.map(
-                      w => `<p>⚠ ${escapeHtml(w)}</p>`
-                    ).join("")
-                  }
-                </div>
-              `
-              : ""
-          }
-
-          ${
-            xlsxSnapshotSource === "live"
-              ? `
-                <p class="sync-disclaimer">
-                  This is being read live off the sheet, not stored
-                  anywhere — there's nothing to clear. To stop
-                  using it, remove the URL from
-                  <code>APPS_SCRIPT_URL</code> in App.js.
-                </p>
-              `
-              : `
-                <button
-                  class="wav-btn"
-                  id="xlsx-clear"
-                  ${hasSnapshot ? "" : "disabled"}
-                >
-                  Clear snapshot
-                </button>
-              `
-          }
-
-          <p class="sync-disclaimer">
-            Uploaded images are a snapshot from the moment you
-            exported the file — they can drift out of sync with
-            the live sheet over time. Anything listed below has
-            changed on the live sheet since your last upload, so
-            treat that image as possibly outdated; it'll disappear
-            from this list on its own once the data lines up again.
-          </p>
-
-          <div id="sync-stale-list">
-            ${
-              staleList.length
-                ? `
-                  <ul>
-                    ${
-                      staleList.map(
-                        s => `
-                          <li>
-                            <strong>${escapeHtml(s.uploadedName)}</strong>
-                            (${escapeHtml(s.tab)} tab) —
-                            row content has changed since upload
-                          </li>
-                        `
-                      ).join("")
-                    }
-                  </ul>
-                `
-                : hasSnapshot
-                  ? `<p class="sync-ok">Everything lines up — no stale images right now.</p>`
-                  : ""
-            }
-          </div>
-
-        </div>
-
-      </div>
-    `;
-
-  updateSyncTabDot(staleList.length);
-
-  document
-    .getElementById("xlsx-input")
-    .addEventListener("change",handleXlsxUpload);
-
-  const clearBtn =
-    document.getElementById("xlsx-clear");
-
-  if(clearBtn){
-
-    clearBtn.addEventListener("click",async () => {
-
-      xlsxSnapshot = {};
-      xlsxNameIndex = {};
-      lastSyncWarnings = [];
-      xlsxSnapshotSource = null;
-
-      await clearXlsxSnapshotStorage();
-
-      renderSyncPage();
-
-      renderIconSections(
-        "tab-runes",
-        parseTextSections(
-          liveRowsByKey.runes,
-          "rune",
-          "runes"
-        )
-      );
-
-    });
-  }
-}
-
-
-/*
- * Puts a small red dot on the "Data Sync" tab button itself so
- * a live-vs-snapshot mismatch is visible without having to open
- * that tab to notice it.
- */
-function updateSyncTabDot(staleCount){
-
-  const btn =
-    document.querySelector('button[data-tab="sync"]');
-
-  if(!btn){
-    return;
-  }
-
-  let dot =
-    btn.querySelector(".stale-dot");
-
-  if(staleCount > 0){
-
-    if(!dot){
-      dot = document.createElement("span");
-      dot.className = "stale-dot";
-      btn.appendChild(dot);
-    }
-
-    dot.title =
-      `${staleCount} image${staleCount === 1 ? "" : "s"} out of sync with the live sheet`;
-
-  }else if(dot){
-    dot.remove();
-  }
-}
-
-
-async function handleXlsxUpload(e){
-
-  const file =
-    e.target.files[0];
-
-  if(!file){
-    return;
-  }
-
-  const statusEl =
-    document.getElementById("sync-status");
-
-  if(statusEl){
-    statusEl.textContent =
-      "Reading file…";
-  }
-
-  try{
-
-    const result =
-      await loadXlsxSnapshot(file);
-
-    xlsxSnapshot = result.snapshot;
-    lastSyncWarnings = result.warnings;
-    xlsxSnapshotSource = "upload";
-
-    rebuildXlsxNameIndex();
-
-    const saved =
-      await saveXlsxSnapshotToStorage();
-
-    if(!saved){
-      lastSyncWarnings = [
-        ...lastSyncWarnings,
-        "This snapshot is a bit large to save for next time — " +
-        "it'll work for this session, but you'll need to " +
-        "re-upload after refreshing the page."
-      ];
-    }
-
-    renderIconSections(
-      "tab-runes",
-      parseTextSections(
-        liveRowsByKey.runes,
-        "rune",
-        "runes"
-      )
-    );
-
-    renderSyncPage();
-
-  }catch(err){
-
-    console.error(err);
-
-    lastSyncWarnings = [];
-
-    if(statusEl){
-      statusEl.textContent =
-        "Couldn't read that file: " + err.message;
-    }
-  }
-}
 
 
 /* ============================================================
