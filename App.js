@@ -1870,13 +1870,27 @@ function parseTextSections(rows,iconType,xlsxTabKey){
         }
       }
 
-      if(icon || explText || label){
+      if(icon || explText){
 
         current.items.push({
           icon:icon,
           label:label,
           text:explText
         });
+
+      }else if(label){
+
+        // No icon was found for this and there's no paired
+        // explanation text either — this is almost never a real
+        // item/rune entry (those always have at least one of
+        // those two things). Far more often it's intro text,
+        // instructions, or a stray label that happened to land
+        // in a "name" column because the row above declared a
+        // pairing that doesn't actually apply to this row.
+        // Showing it as a small note avoids fabricating a
+        // broken-looking card with a fake "(no description)"
+        // body for content that was never meant to be an item.
+        current.notes.push(label);
       }
 
     });
