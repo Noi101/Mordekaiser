@@ -519,24 +519,22 @@ pre.rune-text{
   margin-bottom:14px;
 }
 
-.icon-grid{
-  column-count:3;
-  column-gap:14px;
+.icon-section-rows{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
 }
 
-@media (max-width:900px){
-  .icon-grid{
-    column-count:2;
-  }
-}
-
-@media (max-width:600px){
-  .icon-grid{
-    column-count:1;
-  }
+.icon-item-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:flex-start;
+  gap:14px;
 }
 
 .icon-card{
+  flex:1 1 220px;
+  min-width:200px;
   display:flex;
   gap:12px;
   background:var(--bg-stone);
@@ -544,9 +542,6 @@ pre.rune-text{
   border-left:3px solid var(--rune-gold);
   border-radius:10px;
   padding:12px 14px;
-  margin-bottom:14px;
-  break-inside:avoid;
-  -webkit-column-break-inside:avoid;
 }
 
 .icon-card:hover{

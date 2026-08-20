@@ -104,6 +104,7 @@ let titleByKey = {};
 let liveRowsByKey = {};
 let xlsxSnapshot = {};
 let xlsxNameIndex = {};
+let xlsxPosIndex = {};
 let currentOpenChampion = null;
 
 
@@ -128,21 +129,6 @@ function normalizeName(name){
     .replace(/&/g,"and")
     .replace(/[^a-z0-9]/g,"");
 }
-
-
-/*
- * How far into a normalized (spaces/punctuation stripped) block
- * of text findItemData/findRuneData will look when hunting for
- * a name mentioned inside a longer description, rather than
- * given as a clean standalone cell. ~90 normalized characters is
- * roughly the first sentence or two — long enough to catch every
- * write-up style actually used on the sheet ("Hextech Rocketbelt
- * is Mordekaiser's best option...", "As a damage item, Dusk &
- * Dawn's best use case is...") without reaching into asides
- * later in the paragraph that mention a completely different
- * item/rune in passing.
- */
-const NAME_MENTION_WINDOW = 90;
 
 
 /*
@@ -648,162 +634,6 @@ function championSquareImage(name){
 }
 
 
-/* ============================================================
-   ITEM IMAGE LOOKUP (text-name fallback, used only when a
-   cell has no inserted =IMAGE() picture to read directly)
-   ============================================================ */
-
-function findItemData(text){
-
-  const wanted =
-    normalizeName(text);
-
-  if(!wanted){
-    return null;
-  }
-
-  /*
-   * Exact item-name matching.
-   */
-  for(const id in ddragonItems){
-
-    const item =
-      ddragonItems[id];
-
-    if(!item.name){
-      continue;
-    }
-
-    if(
-      normalizeName(item.name) === wanted
-    ){
-      return {
-        id:id,
-        name:item.name,
-        icon:
-          `${DDRAGON_BASE}/cdn/${ddragonVersion}` +
-          `/img/item/${id}.png`
-      };
-    }
-  }
-
-  /*
-   * If the spreadsheet cell contains a longer build
-   * description, search for an item name inside it. Restricted
-   * to roughly the first sentence or two (NAME_MENTION_WINDOW
-   * normalized characters) rather than the whole paragraph —
-   * these write-ups consistently name the actual item being
-   * discussed right at the start ("Hextech Rocketbelt is
-   * Mordekaiser's best option...") but often mention OTHER item
-   * names later on in passing ("...or get Dusk & Dawn which
-   * doesn't even require..."). Searching the whole text would
-   * grab whichever mentioned name happens to be longest,
-   * regardless of whether it's the item actually being written
-   * about.
-   */
-  let best = null;
-  let bestIndex = Infinity;
-
-  for(const id in ddragonItems){
-
-    const item =
-      ddragonItems[id];
-
-    if(!item.name){
-      continue;
-    }
-
-    const itemName =
-      normalizeName(item.name);
-
-    if(itemName.length < 4){
-      continue;
-    }
-
-    const idx =
-      wanted.indexOf(itemName);
-
-    if(idx === -1 || idx > NAME_MENTION_WINDOW){
-      continue;
-    }
-
-    const better =
-      !best ||
-      idx < bestIndex ||
-      (
-        idx === bestIndex &&
-        itemName.length > normalizeName(best.name).length
-      );
-
-    if(better){
-
-      best = {
-        id:id,
-        name:item.name,
-        icon:
-          `${DDRAGON_BASE}/cdn/${ddragonVersion}` +
-          `/img/item/${id}.png`
-      };
-
-      bestIndex = idx;
-    }
-  }
-
-  return best;
-}
-
-
-/* ============================================================
-   RUNE IMAGE LOOKUP (text-name fallback)
-   ============================================================ */
-
-function findRuneData(text){
-
-  const wanted =
-    normalizeName(text);
-
-  if(!wanted){
-    return null;
-  }
-
-  if(ddragonRunes[wanted]){
-    return ddragonRunes[wanted];
-  }
-
-  let best = null;
-  let bestIndex = Infinity;
-
-  for(const key in ddragonRunes){
-
-    if(key.length < 4){
-      continue;
-    }
-
-    const idx =
-      wanted.indexOf(key);
-
-    if(idx === -1 || idx > NAME_MENTION_WINDOW){
-      continue;
-    }
-
-    const better =
-      !best ||
-      idx < bestIndex ||
-      (
-        idx === bestIndex &&
-        key.length > normalizeName(best.name).length
-      );
-
-    if(better){
-      best = ddragonRunes[key];
-      bestIndex = idx;
-    }
-  }
-
-  return best;
-}
-
-
 /*
  * classifyBuildText: counts how many official Riot rune names
  * and how many official Riot item names appear inside a block
@@ -987,7 +817,7 @@ async function fetchAll(){
     const itemizationSections =
       parseTextSections(
         rowsByKey.itemization,
-        "item"
+        "itemization"
       );
 
     renderIconSections(
@@ -998,6 +828,7 @@ async function fetchAll(){
     itemizationFlat =
       itemizationSections
         .flatMap(s => s.items)
+        .flatMap(group => group.tiers)
         .filter(it => it.icon && it.label && it.text);
 
 
@@ -1005,7 +836,6 @@ async function fetchAll(){
       "tab-runes",
       parseTextSections(
         rowsByKey.runes,
-        "rune",
         "runes"
       )
     );
@@ -1779,7 +1609,7 @@ function detectPairColumns(row){
 }
 
 
-function parseTextSections(rows,iconType,xlsxTabKey){
+function parseTextSections(rows,xlsxTabKey){
 
   const sections = [];
 
@@ -1810,7 +1640,7 @@ function parseTextSections(rows,iconType,xlsxTabKey){
   }
 
 
-  (rows || []).forEach(row => {
+  (rows || []).forEach((row,rowIndex) => {
 
     const cells =
       (row || []).map(cellText);
@@ -1865,6 +1695,16 @@ function parseTextSections(rows,iconType,xlsxTabKey){
       return;
     }
 
+    /*
+     * Every pair on THIS spreadsheet row is collected into one
+     * group and rendered together as a single row — this is
+     * what keeps e.g. Dark Seal's four tiers side by side
+     * instead of scattering across the page, and keeps the
+     * Rune Guide's "Grasp / Aery / Shield Bash" example
+     * together exactly as laid out in the sheet.
+     */
+    const rowGroup = [];
+
     pairCols.forEach(([nameCol,explCol]) => {
 
       const rawName =
@@ -1876,61 +1716,42 @@ function parseTextSections(rows,iconType,xlsxTabKey){
       const explText =
         cellText((row || [])[explCol]);
 
-      const directImage =
+      /*
+       * Icon resolution is purely positional now — no text
+       * guessing at all:
+       *
+       * 1. An =IMAGE("...") formula sitting in the name cell —
+       *    the sheet is explicitly declaring the picture right
+       *    there.
+       * 2. A picture pasted directly into that EXACT cell,
+       *    matched by (row,col) against the live .xlsx export.
+       *
+       * Whatever image the spreadsheet actually has anchored at
+       * this cell IS this row's icon; whatever text sits
+       * immediately to its right IS that image's write-up. If
+       * there's no image at this position, there's no icon —
+       * full stop, no fuzzy fallback searching the text for a
+       * name that might match something in Data Dragon.
+       */
+      let icon =
         extractImageUrl(rawName);
-
-      let icon = directImage;
-      let label = nameText;
-
-      if(!icon && nameText){
-
-        const found =
-          iconType === "item"
-            ? findItemData(nameText)
-            : findRuneData(nameText);
-
-        if(found){
-          icon = found.icon;
-          label = found.name;
-        }
-      }
-
-      if(!icon && !nameText && explText){
-
-        // Last resort: the name cell was blank (image the
-        // Sheets API couldn't expose) — try to infer from the
-        // explanation text itself.
-        const found =
-          iconType === "item"
-            ? findItemData(explText)
-            : findRuneData(explText);
-
-        if(found){
-          icon = found.icon;
-          label = found.name;
-        }
-      }
 
       if(!icon && xlsxTabKey){
 
-        // Last-last resort: an image was pasted directly into
-        // the cell (not an =IMAGE() formula, not a name Data
-        // Dragon recognizes) — only readable from the sheet's
-        // live .xlsx export, matched by name.
         const entry =
-          lookupXlsxImage(
-            xlsxTabKey,
-            label || explText
-          );
+          lookupXlsxImageAt(xlsxTabKey,rowIndex,nameCol);
 
         if(entry){
           icon = entry.imageUrl;
         }
       }
 
+      const label =
+        nameText || null;
+
       if(icon || explText){
 
-        current.items.push({
+        rowGroup.push({
           icon:icon,
           label:label,
           text:explText
@@ -1952,6 +1773,10 @@ function parseTextSections(rows,iconType,xlsxTabKey){
       }
 
     });
+
+    if(rowGroup.length){
+      current.items.push({tiers:rowGroup});
+    }
 
   });
 
@@ -2004,46 +1829,56 @@ function renderIconSections(containerId,sections){
           ${
             sec.items.length
               ? `
-                <div class="icon-grid">
+                <div class="icon-section-rows">
 
                   ${
                     sec.items.map(
-                      it => `
-                        <div class="icon-card">
+                      group => `
+                        <div class="icon-item-row">
 
                           ${
-                            it.icon
-                              ? `
-                                <div class="icon-img-wrap">
-                                  <img
-                                    src="${it.icon}"
-                                    alt=""
-                                    loading="lazy"
-                                  >
-                                </div>
-                              `
-                              : `
-                                <div class="icon-placeholder">
-                                  ${
-                                    it.label
-                                      ? escapeHtml(it.label)
-                                      : "?"
-                                  }
-                                </div>
-                              `
-                          }
+                            group.tiers.map(
+                              it => `
+                                <div class="icon-card">
 
-                          <p>
-                            ${
-                              it.label
-                                ? `<strong>${escapeHtml(it.label)}</strong>`
-                                : ""
-                            }
-                            ${escapeHtml(
-                              it.text ||
-                              "(no description)"
-                            )}
-                          </p>
+                                  ${
+                                    it.icon
+                                      ? `
+                                        <div class="icon-img-wrap">
+                                          <img
+                                            src="${it.icon}"
+                                            alt=""
+                                            loading="lazy"
+                                          >
+                                        </div>
+                                      `
+                                      : `
+                                        <div class="icon-placeholder">
+                                          ${
+                                            it.label
+                                              ? escapeHtml(it.label)
+                                              : "?"
+                                          }
+                                        </div>
+                                      `
+                                  }
+
+                                  <p>
+                                    ${
+                                      it.label
+                                        ? `<strong>${escapeHtml(it.label)}</strong>`
+                                        : ""
+                                    }
+                                    ${escapeHtml(
+                                      it.text ||
+                                      "(no description)"
+                                    )}
+                                  </p>
+
+                                </div>
+                              `
+                            ).join("")
+                          }
 
                         </div>
                       `
@@ -2565,12 +2400,17 @@ function resolveIconRowName(tabKey,rowIndex,col){
 function rebuildXlsxNameIndex(){
 
   xlsxNameIndex = {};
+  xlsxPosIndex = {};
 
   for(const tabKey in xlsxSnapshot){
 
     xlsxNameIndex[tabKey] = {};
+    xlsxPosIndex[tabKey] = {};
 
     xlsxSnapshot[tabKey].forEach(entry => {
+
+      xlsxPosIndex[tabKey][`${entry.row},${entry.col}`] =
+        entry;
 
       const key =
         (entry.name || "")
@@ -2599,6 +2439,23 @@ function rebuildXlsxNameIndex(){
         )
     );
   }
+}
+
+
+/*
+ * lookupXlsxImageAt: the picture pasted at this EXACT cell —
+ * matched purely by row/column position against the live .xlsx
+ * export, never by guessing from nearby text. This is the "the
+ * picture is here, so it belongs to the text right next to it"
+ * rule: whatever image the spreadsheet actually has anchored at
+ * (row,col) is that row's icon, full stop.
+ */
+function lookupXlsxImageAt(tabKey,row,col){
+
+  return (
+    xlsxPosIndex[tabKey] &&
+    xlsxPosIndex[tabKey][`${row},${col}`]
+  ) || null;
 }
 
 
@@ -2656,24 +2513,34 @@ async function fetchLiveXlsxImages(){
       "tab-runes",
       parseTextSections(
         liveRowsByKey.runes,
-        "rune",
         "runes"
       )
     );
   }
 
+  if(liveRowsByKey.itemization){
+
+    const itemizationSections =
+      parseTextSections(
+        liveRowsByKey.itemization,
+        "itemization"
+      );
+
+    renderIconSections(
+      "tab-itemization",
+      itemizationSections
+    );
+
+    itemizationFlat =
+      itemizationSections
+        .flatMap(s => s.items)
+        .flatMap(group => group.tiers)
+        .filter(it => it.icon && it.label && it.text);
+  }
+
   if(currentOpenChampion){
     openDetail(currentOpenChampion);
   }
-}
-
-
-function lookupXlsxImage(tabKey,name){
-
-  const matches =
-    lookupXlsxImages(tabKey,name);
-
-  return matches.length ? matches[0] : null;
 }
 
 
@@ -2969,7 +2836,8 @@ async function loadXlsxSnapshot(data){
 
   const wanted = {
     matchup:titleByKey.matchup,
-    runes:titleByKey.runes
+    runes:titleByKey.runes,
+    itemization:titleByKey.itemization
   };
 
   const snapshot = {};
