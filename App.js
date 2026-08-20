@@ -131,6 +131,21 @@ function normalizeName(name){
 
 
 /*
+ * How far into a normalized (spaces/punctuation stripped) block
+ * of text findItemData/findRuneData will look when hunting for
+ * a name mentioned inside a longer description, rather than
+ * given as a clean standalone cell. ~90 normalized characters is
+ * roughly the first sentence or two — long enough to catch every
+ * write-up style actually used on the sheet ("Hextech Rocketbelt
+ * is Mordekaiser's best option...", "As a damage item, Dusk &
+ * Dawn's best use case is...") without reaching into asides
+ * later in the paragraph that mention a completely different
+ * item/rune in passing.
+ */
+const NAME_MENTION_WINDOW = 90;
+
+
+/*
  * Plain Levenshtein edit distance, used only as a last-resort
  * fuzzy fallback when looking up champion art (see
  * findChampionData below) so a small typo in the spreadsheet's
@@ -674,12 +689,20 @@ function findItemData(text){
 
   /*
    * If the spreadsheet cell contains a longer build
-   * description, search for an item name inside it. We keep
-   * the LONGEST matching item name (not just the first one
-   * object-key order happens to hit) so e.g. "Death's Dance"
-   * isn't shadowed by a shorter unrelated match.
+   * description, search for an item name inside it. Restricted
+   * to roughly the first sentence or two (NAME_MENTION_WINDOW
+   * normalized characters) rather than the whole paragraph —
+   * these write-ups consistently name the actual item being
+   * discussed right at the start ("Hextech Rocketbelt is
+   * Mordekaiser's best option...") but often mention OTHER item
+   * names later on in passing ("...or get Dusk & Dawn which
+   * doesn't even require..."). Searching the whole text would
+   * grab whichever mentioned name happens to be longest,
+   * regardless of whether it's the item actually being written
+   * about.
    */
   let best = null;
+  let bestIndex = Infinity;
 
   for(const id in ddragonItems){
 
@@ -693,11 +716,27 @@ function findItemData(text){
     const itemName =
       normalizeName(item.name);
 
-    if(
-      itemName.length >= 4 &&
-      wanted.includes(itemName) &&
-      (!best || itemName.length > normalizeName(best.name).length)
-    ){
+    if(itemName.length < 4){
+      continue;
+    }
+
+    const idx =
+      wanted.indexOf(itemName);
+
+    if(idx === -1 || idx > NAME_MENTION_WINDOW){
+      continue;
+    }
+
+    const better =
+      !best ||
+      idx < bestIndex ||
+      (
+        idx === bestIndex &&
+        itemName.length > normalizeName(best.name).length
+      );
+
+    if(better){
+
       best = {
         id:id,
         name:item.name,
@@ -705,6 +744,8 @@ function findItemData(text){
           `${DDRAGON_BASE}/cdn/${ddragonVersion}` +
           `/img/item/${id}.png`
       };
+
+      bestIndex = idx;
     }
   }
 
@@ -730,15 +771,32 @@ function findRuneData(text){
   }
 
   let best = null;
+  let bestIndex = Infinity;
 
   for(const key in ddragonRunes){
 
-    if(
-      key.length >= 4 &&
-      wanted.includes(key) &&
-      (!best || key.length > normalizeName(best.name).length)
-    ){
+    if(key.length < 4){
+      continue;
+    }
+
+    const idx =
+      wanted.indexOf(key);
+
+    if(idx === -1 || idx > NAME_MENTION_WINDOW){
+      continue;
+    }
+
+    const better =
+      !best ||
+      idx < bestIndex ||
+      (
+        idx === bestIndex &&
+        key.length > normalizeName(best.name).length
+      );
+
+    if(better){
       best = ddragonRunes[key];
+      bestIndex = idx;
     }
   }
 
@@ -1710,7 +1768,7 @@ function detectPairColumns(row){
 
   const pairs = [];
 
-  for(let i = 0; i < cells.length - 1; i++){
+  for(let i = 0; i < cells.length; i++){
 
     if(NAME_HEADER_RE.test(cells[i])){
       pairs.push([i, i + 1]);
