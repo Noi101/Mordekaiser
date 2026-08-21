@@ -1287,6 +1287,39 @@ function openDetail(c){
   const xlsxItems =
     lookupXlsxImages("matchup",c.name);
 
+  /*
+   * These pasted-in pictures follow a fixed meaning per
+   * champion block in the sheet:
+   *   1st  — decorative, not shown
+   *   2nd  — an in-game screenshot of the rune build, shown
+   *          large, beside the Rune Build write-up
+   *   3rd–8th — the item build order, shown as an arrow chain
+   *   last 2 — situational/alternate items, cased together
+   *
+   * Sliced dynamically off however many pictures actually exist
+   * for this champion rather than assuming exactly 10, so a
+   * champion with fewer pasted pictures still lays out sensibly
+   * instead of leaving gaps or double-counting an image.
+   */
+  const afterFirst =
+    xlsxItems.slice(1);
+
+  const runeBuildImage =
+    afterFirst[0] || null;
+
+  const afterRuneImage =
+    afterFirst.slice(1);
+
+  const encasedPair =
+    afterRuneImage.length >= 2
+      ? afterRuneImage.slice(-2)
+      : [];
+
+  const itemChain =
+    afterRuneImage.length >= 2
+      ? afterRuneImage.slice(0,-2)
+      : afterRuneImage;
+
 
   sheetContent.innerHTML =
     `
@@ -1403,31 +1436,85 @@ function openDetail(c){
       <div class="sheet-body">
 
         ${
-          c.runeBuild
+          c.runeBuild || runeBuildImage
             ? `
               <div class="section-title">
                 Rune Build
               </div>
 
-              ${renderConditionalHtml(c.runeBuild,"rune-text")}
+              <div class="rune-build-row">
+
+                ${
+                  c.runeBuild
+                    ? `
+                      <div class="rune-build-text">
+                        ${renderConditionalHtml(c.runeBuild,"rune-text")}
+                      </div>
+                    `
+                    : ""
+                }
+
+                ${
+                  runeBuildImage
+                    ? `
+                      <div class="rune-build-image">
+                        <img
+                          src="${runeBuildImage.imageUrl}"
+                          alt="${escapeHtml(c.name)} rune build"
+                          loading="lazy"
+                        >
+                      </div>
+                    `
+                    : ""
+                }
+
+              </div>
             `
             : ""
         }
 
 
         ${
-          c.itemization || xlsxItems.length
+          c.itemization || itemChain.length || encasedPair.length
             ? `
               <div class="section-title">
                 Itemization
               </div>
 
               ${
-                xlsxItems.length
+                itemChain.length
                   ? `
-                    <div class="xlsx-item-row">
+                    <div class="item-chain">
                       ${
-                        xlsxItems.map(
+                        itemChain.map(
+                          (entry,i) => `
+                            ${
+                              i
+                                ? `<span class="item-arrow">→</span>`
+                                : ""
+                            }
+                            <div class="item-chain-icon">
+                              <img
+                                src="${entry.imageUrl}"
+                                alt=""
+                                loading="lazy"
+                              >
+                            </div>
+                          `
+                        ).join("")
+                      }
+                    </div>
+                  `
+                  : ""
+              }
+
+              ${
+                encasedPair.length
+                  ? `
+                    <div class="encased-pair">
+                      <span class="encased-pair-label">Situational</span>
+                      ${
+                        encasedPair.map(
                           entry => `
                             <div class="xlsx-item-chip">
                               <img
@@ -1853,12 +1940,8 @@ function renderIconSections(containerId,sections){
                                         </div>
                                       `
                                       : `
-                                        <div class="icon-placeholder">
-                                          ${
-                                            it.label
-                                              ? escapeHtml(it.label)
-                                              : "?"
-                                          }
+                                        <div class="icon-placeholder icon-tip">
+                                          TIP
                                         </div>
                                       `
                                   }
@@ -3052,7 +3135,7 @@ searchEl.addEventListener(
    Nightfall and restarts the idle clock.
    ============================================================ */
 
-const NIGHTFALL_DELAY_MS = 6000;
+const NIGHTFALL_DELAY_MS = 120000;
 
 const HOVER_SELECTOR =
   "a, button, input, textarea, .card, .icon-card, " +
